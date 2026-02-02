@@ -5,7 +5,7 @@ pub mod tensor;
 pub mod backend;
 
 pub use gguf::GgufFile;
-pub use tensor::{Tensor, DType};
+pub use tensor::{DType, Tensor, TensorError, TensorStorage};
 pub use backend::Backend;
 
 #[derive(thiserror::Error, Debug)]
