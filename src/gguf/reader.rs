@@ -342,7 +342,7 @@ impl<R: Read + Seek> GgufReader<R> {
 /// Align an offset to the given alignment
 fn align_offset(offset: u64, alignment: usize) -> u64 {
     let alignment = alignment as u64;
-    (offset + alignment - 1) / alignment * alignment
+    offset.div_ceil(alignment) * alignment
 }
 
 #[cfg(test)]

@@ -116,7 +116,8 @@ fn test_multiple_metadata_types() {
     data.extend_from_slice(&(key.len() as u64).to_le_bytes());
     data.extend_from_slice(key);
     data.extend_from_slice(&6u32.to_le_bytes()); // Type: Float32
-    data.extend_from_slice(&3.14f32.to_le_bytes());
+    let test_float = 2.5f32;
+    data.extend_from_slice(&test_float.to_le_bytes());
 
     // Metadata 4: bool
     let key = b"test.bool";
@@ -138,7 +139,7 @@ fn test_multiple_metadata_types() {
 
     assert_eq!(parsed.header.metadata_kv_count, 5);
     assert_eq!(parsed.get_u64("test.u64"), Some(0xFFFF_FFFF_FFFF_FFFF));
-    assert_eq!(parsed.get_f32("test.f32"), Some(3.14));
+    assert_eq!(parsed.get_f32("test.f32"), Some(2.5));
 }
 
 #[test]

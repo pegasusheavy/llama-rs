@@ -20,6 +20,9 @@ impl GgufFile {
     pub fn open<P: AsRef<std::path::Path>>(path: P) -> Result<Self, GgufError> {
         let file = std::fs::File::open(&path)?;
         let data = GgufReader::open(&path)?.read()?;
+        // SAFETY: memmap2::Mmap ensures safe memory access. The file handle is kept
+        // alive for the lifetime of this struct. External modifications to the file
+        // could cause undefined behavior, but this is documented in memmap2.
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
         Ok(Self { data, mmap })
     }
@@ -27,7 +30,10 @@ impl GgufFile {
     pub fn tensor_data(&self, name: &str) -> Option<&[u8]> {
         let info = self.data.get_tensor(name)?;
         let start = (self.data.data_offset + info.offset) as usize;
-        let end = start + info.data_size();
+        let end = start.checked_add(info.data_size())?;
+        if end > self.mmap.len() {
+            return None;
+        }
         Some(&self.mmap[start..end])
     }
 }
