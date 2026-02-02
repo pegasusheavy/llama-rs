@@ -92,11 +92,18 @@ impl DType {
 
     /// Returns true if this is a quantized type
     pub const fn is_quantized(&self) -> bool {
-        match self {
-            Self::F32 | Self::F16 | Self::BF16 | Self::F64 => false,
-            Self::I8 | Self::I16 | Self::I32 | Self::I64 | Self::U8 => false,
-            _ => true,
-        }
+        !matches!(
+            self,
+            Self::F32
+                | Self::F16
+                | Self::BF16
+                | Self::F64
+                | Self::I8
+                | Self::I16
+                | Self::I32
+                | Self::I64
+                | Self::U8
+        )
     }
 
     /// Calculate the byte size needed for a given number of elements
@@ -105,7 +112,7 @@ impl DType {
         let block_bytes = self.block_bytes();
         // For quantized types, elements must be a multiple of block_size
         // We round up to handle partial blocks
-        let n_blocks = (n_elements + block_size - 1) / block_size;
+        let n_blocks = n_elements.div_ceil(block_size);
         n_blocks * block_bytes
     }
 }
