@@ -6,6 +6,7 @@
 mod core;
 mod dtype;
 mod error;
+pub mod quant;
 mod storage;
 
 pub use core::{compute_strides, Tensor};
