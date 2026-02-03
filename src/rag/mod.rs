@@ -1,7 +1,53 @@
 //! RAG (Retrieval-Augmented Generation) support with pgvector
 //!
 //! This module provides integration with PostgreSQL + pgvector for
-//! semantic search and context retrieval during inference.
+//! semantic search and context retrieval during inference, with an
+//! AWS Bedrock Knowledge Bases-style API.
+//!
+//! # Knowledge Base API (Recommended)
+//!
+//! ```rust,ignore
+//! use llama_gguf::rag::{KnowledgeBase, KnowledgeBaseBuilder, DataSource, ChunkingStrategy};
+//!
+//! // Create a knowledge base with the builder
+//! let kb = KnowledgeBaseBuilder::new("my-kb")
+//!     .description("Documentation knowledge base")
+//!     .fixed_size_chunking(300, 20)  // 300 tokens, 20% overlap
+//!     .max_results(5)
+//!     .create()
+//!     .await?;
+//!
+//! // Ingest documents
+//! kb.ingest(DataSource::Directory {
+//!     path: "./docs".into(),
+//!     pattern: Some("**/*.md".into()),
+//!     recursive: true,
+//! }).await?;
+//!
+//! // Retrieve and generate
+//! let response = kb.retrieve_and_generate("What is the main feature?", None).await?;
+//! println!("Answer: {}", response.output);
+//!
+//! // Print citations
+//! for citation in response.citations {
+//!     println!("Source: {} (score: {:.2})", citation.source.uri, citation.score);
+//! }
+//! ```
+//!
+//! # Low-Level Store API
+//!
+//! For direct vector store access:
+//!
+//! ```rust,ignore
+//! use llama_gguf::rag::{RagConfig, RagStore, MetadataFilter};
+//!
+//! let config = RagConfig::load(Some("rag.toml"))?;
+//! let store = RagStore::connect(config).await?;
+//!
+//! // Search with filters
+//! let filter = MetadataFilter::eq("type", "documentation");
+//! let results = store.search_with_filter(&query_embedding, Some(5), Some(filter)).await?;
+//! ```
 //!
 //! # Setup
 //!
@@ -10,33 +56,14 @@
 //!    CREATE EXTENSION vector;
 //!    ```
 //!
-//! 2. Create embeddings table:
-//!    ```sql
-//!    CREATE TABLE embeddings (
-//!        id SERIAL PRIMARY KEY,
-//!        content TEXT NOT NULL,
-//!        embedding vector(384),  -- Adjust dimension for your model
-//!        metadata JSONB,
-//!        created_at TIMESTAMPTZ DEFAULT NOW()
-//!    );
-//!    CREATE INDEX ON embeddings USING ivfflat (embedding vector_cosine_ops);
+//! 2. Configure connection in `rag.toml` or via environment:
+//!    ```toml
+//!    [database]
+//!    connection_string = "postgres://user:pass@localhost/db"
+//!    
+//!    [embeddings]
+//!    dimension = 384
 //!    ```
-//!
-//! # Example
-//!
-//! ```ignore
-//! use llama_gguf::rag::{RagConfig, RagStore};
-//!
-//! let config = RagConfig::new("postgres://user:pass@localhost/db");
-//! let store = RagStore::connect(config).await?;
-//!
-//! // Search for relevant context
-//! let results = store.search(&query_embedding, 5).await?;
-//!
-//! // Build augmented prompt
-//! let context = results.iter().map(|r| r.content.as_str()).collect::<Vec<_>>().join("\n");
-//! let prompt = format!("Context:\n{}\n\nQuestion: {}", context, user_query);
-//! ```
 
 #[cfg(feature = "rag")]
 mod store;
@@ -44,6 +71,8 @@ mod store;
 mod config;
 #[cfg(feature = "rag")]
 mod embedding;
+#[cfg(feature = "rag")]
+mod knowledge_base;
 
 #[cfg(feature = "rag")]
 pub use store::*;
@@ -53,6 +82,8 @@ pub use config::*;
 pub use embedding::*;
 #[cfg(feature = "rag")]
 pub use config::example_config;
+#[cfg(feature = "rag")]
+pub use knowledge_base::*;
 
 use thiserror::Error;
 

@@ -350,6 +350,138 @@ enum RagAction {
         #[arg(short, long, default_value = "rag.toml")]
         output: String,
     },
+
+    // =========================================================================
+    // Knowledge Base Commands (Bedrock-style API)
+    // =========================================================================
+
+    /// Create a new knowledge base
+    #[command(name = "kb-create")]
+    KbCreate {
+        /// Knowledge base name
+        name: String,
+
+        /// Description
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// Path to TOML config file
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Chunking strategy: none, fixed, semantic, hierarchical
+        #[arg(long, default_value = "fixed")]
+        chunking: String,
+
+        /// Max tokens per chunk (for fixed/semantic chunking)
+        #[arg(long, default_value = "300")]
+        max_tokens: usize,
+
+        /// Overlap percentage (for fixed/hierarchical chunking)
+        #[arg(long, default_value = "20")]
+        overlap: u8,
+    },
+
+    /// Ingest data into a knowledge base
+    #[command(name = "kb-ingest")]
+    KbIngest {
+        /// Knowledge base name
+        #[arg(short, long)]
+        name: String,
+
+        /// Path to file or directory to ingest
+        path: String,
+
+        /// Path to TOML config file
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// File pattern for directories (e.g., "*.md")
+        #[arg(long)]
+        pattern: Option<String>,
+
+        /// Recursive directory search
+        #[arg(long, default_value = "true")]
+        recursive: bool,
+    },
+
+    /// Query a knowledge base (retrieve only)
+    #[command(name = "kb-retrieve")]
+    KbRetrieve {
+        /// Query text
+        query: String,
+
+        /// Knowledge base name
+        #[arg(short, long)]
+        name: String,
+
+        /// Path to TOML config file
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Maximum results
+        #[arg(short, long, default_value = "5")]
+        limit: usize,
+
+        /// Minimum similarity score
+        #[arg(long, default_value = "0.5")]
+        min_score: f32,
+    },
+
+    /// Retrieve and generate (RAG pipeline)
+    #[command(name = "kb-rag")]
+    KbRetrieveAndGenerate {
+        /// Query text
+        query: String,
+
+        /// Knowledge base name
+        #[arg(short, long)]
+        name: String,
+
+        /// Path to TOML config file
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Maximum results to retrieve
+        #[arg(short, long, default_value = "5")]
+        limit: usize,
+
+        /// Custom prompt template (use {context} and {query} placeholders)
+        #[arg(long)]
+        prompt_template: Option<String>,
+
+        /// Show citations
+        #[arg(long, default_value = "true")]
+        citations: bool,
+    },
+
+    /// Show knowledge base statistics
+    #[command(name = "kb-stats")]
+    KbStats {
+        /// Knowledge base name
+        #[arg(short, long)]
+        name: String,
+
+        /// Path to TOML config file
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+
+    /// Delete a knowledge base
+    #[command(name = "kb-delete")]
+    KbDelete {
+        /// Knowledge base name
+        #[arg(short, long)]
+        name: String,
+
+        /// Path to TOML config file
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Skip confirmation
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1832,6 +1964,255 @@ fn run_rag_command(action: RagAction) -> Result<(), Box<dyn std::error::Error>> 
             println!("Generated example configuration: {}", output);
             println!("\nEdit this file to configure your RAG database connection.");
             println!("Then use: llama-gguf rag init --config {}", output);
+        }
+
+        // =====================================================================
+        // Knowledge Base Commands
+        // =====================================================================
+
+        RagAction::KbCreate { name, description, config, chunking, max_tokens, overlap } => {
+            rt.block_on(async {
+                use llama_gguf::rag::{KnowledgeBaseBuilder, ChunkingStrategy};
+
+                // Load base config
+                let storage = RagConfig::load(config.as_deref())?;
+
+                // Parse chunking strategy
+                let chunking_strategy = match chunking.to_lowercase().as_str() {
+                    "none" => ChunkingStrategy::None,
+                    "fixed" => ChunkingStrategy::FixedSize {
+                        max_tokens,
+                        overlap_percentage: overlap.min(50),
+                    },
+                    "semantic" => ChunkingStrategy::Semantic {
+                        max_tokens,
+                        buffer_size: 100,
+                    },
+                    "hierarchical" => ChunkingStrategy::Hierarchical {
+                        parent_max_tokens: max_tokens * 2,
+                        child_max_tokens: max_tokens,
+                        child_overlap_percentage: overlap.min(50),
+                    },
+                    _ => {
+                        eprintln!("Unknown chunking strategy: {}. Using 'fixed'.", chunking);
+                        ChunkingStrategy::FixedSize {
+                            max_tokens,
+                            overlap_percentage: overlap.min(50),
+                        }
+                    }
+                };
+
+                let mut builder = KnowledgeBaseBuilder::new(&name)
+                    .storage(storage)
+                    .chunking(chunking_strategy);
+
+                if let Some(desc) = description {
+                    builder = builder.description(desc);
+                }
+
+                let kb = builder.create().await?;
+
+                println!("Created knowledge base: {}", kb.name());
+                println!("  Chunking: {:?}", kb.config().chunking);
+                println!("  Embedding dim: {}", kb.config().storage.embedding_dim());
+                println!("\nNext steps:");
+                println!("  llama-gguf rag kb-ingest -n {} <path>", name);
+
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
+        }
+
+        RagAction::KbIngest { name, path, config, pattern, recursive } => {
+            rt.block_on(async {
+                use llama_gguf::rag::{KnowledgeBase, KnowledgeBaseConfig, DataSource};
+                use std::path::Path;
+
+                let storage = RagConfig::load(config.as_deref())?;
+                let kb_config = KnowledgeBaseConfig {
+                    name: name.clone(),
+                    storage,
+                    ..Default::default()
+                };
+
+                let kb = KnowledgeBase::connect(kb_config).await?;
+
+                let source_path = Path::new(&path);
+                let source = if source_path.is_file() {
+                    DataSource::File { path: source_path.to_path_buf() }
+                } else if source_path.is_dir() {
+                    DataSource::Directory {
+                        path: source_path.to_path_buf(),
+                        pattern,
+                        recursive,
+                    }
+                } else {
+                    return Err(format!("Path not found: {}", path).into());
+                };
+
+                println!("Ingesting from: {}", path);
+                let result = kb.ingest(source).await?;
+
+                println!("\nIngestion complete:");
+                println!("  Documents processed: {}", result.documents_processed);
+                println!("  Chunks created: {}", result.chunks_created);
+                println!("  Total characters: {}", result.metadata.total_characters);
+
+                if !result.failures.is_empty() {
+                    println!("\nFailures:");
+                    for (path, err) in &result.failures {
+                        println!("  {}: {}", path, err);
+                    }
+                }
+
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
+        }
+
+        RagAction::KbRetrieve { query, name, config, limit, min_score } => {
+            rt.block_on(async {
+                use llama_gguf::rag::{KnowledgeBase, KnowledgeBaseConfig, RetrievalConfig};
+
+                let storage = RagConfig::load(config.as_deref())?;
+                let kb_config = KnowledgeBaseConfig {
+                    name: name.clone(),
+                    storage,
+                    ..Default::default()
+                };
+
+                let kb = KnowledgeBase::connect(kb_config).await?;
+
+                let retrieval_config = RetrievalConfig {
+                    max_results: limit,
+                    min_score,
+                    ..Default::default()
+                };
+
+                println!("Querying knowledge base '{}': \"{}\"", name, query);
+                println!();
+
+                let response = kb.retrieve(&query, Some(retrieval_config)).await?;
+
+                if response.chunks.is_empty() {
+                    println!("No results found.");
+                } else {
+                    println!("Found {} results:\n", response.chunks.len());
+
+                    for (i, chunk) in response.chunks.iter().enumerate() {
+                        println!("{}. [score: {:.4}] {}", i + 1, chunk.score, chunk.source.uri);
+                        let preview: String = chunk.content.chars().take(200).collect();
+                        println!("   {}", preview);
+                        if chunk.content.len() > 200 {
+                            println!("   ...");
+                        }
+                        println!();
+                    }
+                }
+
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
+        }
+
+        RagAction::KbRetrieveAndGenerate { query, name, config, limit, prompt_template, citations } => {
+            rt.block_on(async {
+                use llama_gguf::rag::{KnowledgeBase, KnowledgeBaseConfig, RetrievalConfig};
+
+                let storage = RagConfig::load(config.as_deref())?;
+                let kb_config = KnowledgeBaseConfig {
+                    name: name.clone(),
+                    storage,
+                    ..Default::default()
+                };
+
+                let kb = KnowledgeBase::connect(kb_config).await?;
+
+                let retrieval_config = RetrievalConfig {
+                    max_results: limit,
+                    prompt_template,
+                    ..Default::default()
+                };
+
+                println!("Retrieve and Generate from '{}': \"{}\"", name, query);
+                println!();
+
+                let response = kb.retrieve_and_generate(&query, Some(retrieval_config)).await?;
+
+                println!("=== Generated Prompt ===");
+                println!("{}", response.output);
+                println!();
+
+                if citations && !response.citations.is_empty() {
+                    println!("=== Citations ===");
+                    for (i, citation) in response.citations.iter().enumerate() {
+                        println!("{}. {} (score: {:.4})", i + 1, citation.source.uri, citation.score);
+                    }
+                }
+
+                println!("\n[Note: Pass this prompt to your LLM for generation]");
+
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
+        }
+
+        RagAction::KbStats { name, config } => {
+            rt.block_on(async {
+                use llama_gguf::rag::{KnowledgeBase, KnowledgeBaseConfig};
+
+                let storage = RagConfig::load(config.as_deref())?;
+                let kb_config = KnowledgeBaseConfig {
+                    name: name.clone(),
+                    storage,
+                    ..Default::default()
+                };
+
+                let kb = KnowledgeBase::connect(kb_config).await?;
+                let stats = kb.stats().await?;
+
+                println!("Knowledge Base: {}", stats.name);
+                println!("{}", "-".repeat(40));
+                println!("Documents: {}", stats.document_count);
+                println!("Embedding dimension: {}", stats.embedding_dimension);
+                println!("Chunking strategy: {}", stats.chunking_strategy);
+                println!("Hybrid search: {}", if stats.hybrid_search_enabled { "enabled" } else { "disabled" });
+
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
+        }
+
+        RagAction::KbDelete { name, config, force } => {
+            rt.block_on(async {
+                use llama_gguf::rag::{KnowledgeBase, KnowledgeBaseConfig};
+
+                let storage = RagConfig::load(config.as_deref())?;
+                let kb_config = KnowledgeBaseConfig {
+                    name: name.clone(),
+                    storage,
+                    ..Default::default()
+                };
+
+                let kb = KnowledgeBase::connect(kb_config).await?;
+                let stats = kb.stats().await?;
+
+                println!("Knowledge base '{}' contains {} documents.", name, stats.document_count);
+
+                if !force {
+                    print!("Delete all documents? [y/N] ");
+                    use std::io::{self, Write};
+                    io::stdout().flush()?;
+
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+
+                    if !input.trim().eq_ignore_ascii_case("y") {
+                        println!("Cancelled.");
+                        return Ok(());
+                    }
+                }
+
+                kb.delete().await?;
+                println!("Knowledge base '{}' deleted.", name);
+
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
         }
     }
     
