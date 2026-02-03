@@ -22,4 +22,13 @@ pub enum BackendError {
 
     #[error("Tensor error: {0}")]
     Tensor(#[from] crate::tensor::TensorError),
+
+    #[error("Initialization failed: {0}")]
+    InitializationFailed(String),
+
+    #[error("Allocation failed: {0}")]
+    AllocationFailed(String),
+
+    #[error("Operation failed: {0}")]
+    OperationFailed(String),
 }

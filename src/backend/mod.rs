@@ -5,6 +5,8 @@
 
 mod error;
 pub mod cpu;
+#[cfg(feature = "cuda")]
+pub mod cuda;
 #[cfg(feature = "vulkan")]
 pub mod vulkan;
 

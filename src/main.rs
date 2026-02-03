@@ -62,6 +62,10 @@ enum Commands {
         /// Random seed (optional)
         #[arg(long)]
         seed: Option<u64>,
+
+        /// Use GPU acceleration (CUDA)
+        #[arg(long)]
+        gpu: bool,
     },
 
     /// Interactive chat mode
@@ -245,6 +249,7 @@ fn main() {
             top_p,
             repeat_penalty,
             seed,
+            gpu,
         } => {
             if let Err(e) = run_inference(
                 &model,
@@ -255,6 +260,7 @@ fn main() {
                 top_p,
                 repeat_penalty,
                 seed,
+                gpu,
             ) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
@@ -369,6 +375,7 @@ fn run_inference(
     top_p: f32,
     repeat_penalty: f32,
     seed: Option<u64>,
+    use_gpu: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Loading model from: {}", model_path);
 
@@ -392,7 +399,28 @@ fn run_inference(
     let model = loader.build_model()?;
 
     // Create backend and context
-    let backend: Arc<dyn llama_rs::Backend> = Arc::new(llama_rs::backend::cpu::CpuBackend::new());
+    let backend: Arc<dyn llama_rs::Backend> = if use_gpu {
+        #[cfg(feature = "cuda")]
+        {
+            match llama_rs::backend::cuda::CudaBackend::new() {
+                Ok(cuda) => {
+                    eprintln!("Using CUDA backend: {}", cuda.device_name());
+                    Arc::new(cuda)
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to initialize CUDA ({}), falling back to CPU", e);
+                    Arc::new(llama_rs::backend::cpu::CpuBackend::new())
+                }
+            }
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            eprintln!("Warning: CUDA not compiled in, falling back to CPU");
+            Arc::new(llama_rs::backend::cpu::CpuBackend::new())
+        }
+    } else {
+        Arc::new(llama_rs::backend::cpu::CpuBackend::new())
+    };
     let mut ctx = InferenceContext::new(&config, backend);
 
     // Configure sampler

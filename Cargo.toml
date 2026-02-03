@@ -40,7 +40,7 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 indicatif = "0.17"
 directories = "5.0"
 
-cudarc = { version = "0.11", optional = true }
+cudarc = { version = "0.12", optional = true, features = ["cuda-12050"] }
 ash = { version = "0.38", optional = true }
 gpu-allocator = { version = "0.25", optional = true }
 metal = { version = "0.28", optional = true }

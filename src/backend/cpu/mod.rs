@@ -4,7 +4,7 @@
 //! using SIMD operations where possible and rayon for parallelism.
 
 pub mod flash_attn;
-mod ops;
+pub mod ops;
 pub mod simd;
 
 use crate::backend::{Backend, BackendResult};
