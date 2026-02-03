@@ -23,6 +23,8 @@ pub mod gpu_model;
 pub mod gpu_ops;
 #[cfg(feature = "cuda")]
 pub mod gpu_inference;
+#[cfg(feature = "cuda")]
+pub mod dequant_weights;
 
 use crate::backend::{Backend, BackendError, BackendResult};
 use crate::tensor::{DType, Tensor};
@@ -61,6 +63,13 @@ pub struct CudaBackend {
     config: CudaConfig,
     // CPU backend for fallback operations that aren't yet GPU-accelerated
     cpu_backend: crate::backend::cpu::CpuBackend,
+    // Optional: dequantized weights stored on GPU for fast inference
+    gpu_weights: Option<dequant_weights::GpuWeightStore>,
+    // Debug counters
+    #[cfg(feature = "cuda")]
+    gpu_hits: std::sync::atomic::AtomicUsize,
+    #[cfg(feature = "cuda")]
+    cpu_fallbacks: std::sync::atomic::AtomicUsize,
 }
 
 #[cfg(not(feature = "cuda"))]
@@ -87,6 +96,9 @@ impl CudaBackend {
             kernels,
             config,
             cpu_backend: crate::backend::cpu::CpuBackend::new(),
+            gpu_weights: None,
+            gpu_hits: std::sync::atomic::AtomicUsize::new(0),
+            cpu_fallbacks: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -106,6 +118,44 @@ impl CudaBackend {
     #[cfg(not(feature = "cuda"))]
     pub fn device_name(&self) -> String {
         "CUDA disabled".to_string()
+    }
+    
+    /// Load dequantized model weights onto GPU for accelerated inference
+    #[cfg(feature = "cuda")]
+    pub fn load_model_weights(
+        &mut self,
+        model: &crate::model::LlamaModel,
+    ) -> Result<(), BackendError> {
+        let store = dequant_weights::upload_model_weights(
+            Arc::clone(&self.device),
+            model.layers(),
+            model.token_embedding(),
+            model.output(),
+            model.norm(),
+        )?;
+        self.gpu_weights = Some(store);
+        Ok(())
+    }
+    
+    /// Check if GPU weights are loaded
+    #[cfg(feature = "cuda")]
+    pub fn has_gpu_weights(&self) -> bool {
+        self.gpu_weights.is_some()
+    }
+    
+    /// Get VRAM usage of loaded weights
+    #[cfg(feature = "cuda")]
+    pub fn gpu_weight_vram(&self) -> usize {
+        self.gpu_weights.as_ref().map(|w| w.vram_usage()).unwrap_or(0)
+    }
+    
+    /// Get GPU hit/miss statistics
+    #[cfg(feature = "cuda")]
+    pub fn stats(&self) -> (usize, usize) {
+        (
+            self.gpu_hits.load(std::sync::atomic::Ordering::Relaxed),
+            self.cpu_fallbacks.load(std::sync::atomic::Ordering::Relaxed),
+        )
     }
 
     /// Allocate GPU memory and copy data
@@ -383,7 +433,37 @@ impl Backend for CudaBackend {
     }
 
     fn vec_mat(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
-        // Use GPU kernel for vec_mat (critical path)
+        // Check if we have pre-uploaded GPU weights for this tensor
+        if let Some(ref gpu_weights) = self.gpu_weights {
+            if let Some(weight_name) = b.name() {
+                if let Some(gpu_weight) = gpu_weights.get(weight_name) {
+                    // GPU-accelerated path: weight is already on GPU
+                    let a_data = a.as_f32()?;
+                    let out_data = out.as_f32_mut()?;
+                    
+                    let k = gpu_weight.shape[0];
+                    let n_out = gpu_weight.shape[1];
+                    
+                    let a_gpu = self.to_device(a_data)?;
+                    let mut out_gpu = self.alloc_gpu(n_out)?;
+                    
+                    let config = launch_config_1d(n_out, 256);
+                    unsafe {
+                        self.kernels.vec_mat_f32.clone().launch(
+                            config, 
+                            (&a_gpu, &gpu_weight.data, &mut out_gpu, k as i32, n_out as i32)
+                        )
+                    }.map_err(|e| BackendError::OperationFailed(format!("vec_mat kernel failed: {}", e)))?;
+                    
+                    let result = self.from_device(&out_gpu)?;
+                    out_data.copy_from_slice(&result);
+                    
+                    return Ok(());
+                }
+            }
+        }
+        
+        // Standard path: upload weight from CPU each time
         let a_data = a.as_f32()?;
         let b_data = b.as_f32()?;
         let out_data = out.as_f32_mut()?;
@@ -416,12 +496,52 @@ impl Backend for CudaBackend {
     }
 
     fn vec_mat_q(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
-        // The quantized weights are stored in a complex memory layout that doesn't 
-        // match our GPU kernel expectations. Use CPU for quantized ops and GPU for
-        // the rest of the pipeline.
-        //
-        // For true GPU acceleration of quantized inference, weights would need to be
-        // re-laid out at model load time to enable coalesced memory access patterns.
+        // Check if we have pre-dequantized GPU weights for this tensor
+        if let Some(ref gpu_weights) = self.gpu_weights {
+            if let Some(weight_name) = b.name() {
+                if let Some(gpu_weight) = gpu_weights.get(weight_name) {
+                    self.gpu_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    
+                    // GPU-accelerated path: weight is already dequantized on GPU
+                    let a_data = a.as_f32()?;
+                    let out_data = out.as_f32_mut()?;
+                    
+                    // a: [k], b: [k, n], out: [n]
+                    let k = gpu_weight.shape[0];
+                    let n_out = gpu_weight.shape[1];
+                    
+                    // Verify dimensions match
+                    if a_data.len() != k {
+                        return Err(BackendError::OperationFailed(format!(
+                            "vec_mat_q (GPU) dimension mismatch: expected {}, got {}",
+                            k, a_data.len()
+                        )));
+                    }
+                    
+                    // Upload input vector
+                    let a_gpu = self.to_device(a_data)?;
+                    let mut out_gpu = self.alloc_gpu(n_out)?;
+                    
+                    // Launch vec_mat kernel
+                    let config = launch_config_1d(n_out, 256);
+                    unsafe {
+                        self.kernels.vec_mat_f32.clone().launch(
+                            config, 
+                            (&a_gpu, &gpu_weight.data, &mut out_gpu, k as i32, n_out as i32)
+                        )
+                    }.map_err(|e| BackendError::OperationFailed(format!("vec_mat kernel failed: {}", e)))?;
+                    
+                    // Copy result back
+                    let result = self.from_device(&out_gpu)?;
+                    out_data.copy_from_slice(&result);
+                    
+                    return Ok(());
+                }
+            }
+        }
+        
+        // Fallback to CPU for weights not in GPU store
+        self.cpu_fallbacks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.cpu_backend.vec_mat_q(a, b, out)
     }
 

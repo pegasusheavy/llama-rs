@@ -403,8 +403,19 @@ fn run_inference(
         #[cfg(feature = "cuda")]
         {
             match llama_rs::backend::cuda::CudaBackend::new() {
-                Ok(cuda) => {
+                Ok(mut cuda) => {
                     eprintln!("Using CUDA backend: {}", cuda.device_name());
+                    // Upload dequantized weights to GPU for full acceleration
+                    eprintln!("Uploading model weights to GPU (dequantizing to F32)...");
+                    match cuda.load_model_weights(&model) {
+                        Ok(()) => {
+                            let vram_mb = cuda.gpu_weight_vram() as f64 / (1024.0 * 1024.0);
+                            eprintln!("GPU weights loaded: {:.1} MB VRAM", vram_mb);
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: Failed to load GPU weights ({}), using quantized ops", e);
+                        }
+                    }
                     Arc::new(cuda)
                 }
                 Err(e) => {

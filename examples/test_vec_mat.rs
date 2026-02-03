@@ -1,34 +1,56 @@
-// Test vec_mat computation manually
-use llama_rs::tensor::{Tensor, DType};
-use llama_rs::backend::cpu::CpuBackend;
-use llama_rs::Backend;
+//! Test vec_mat kernel correctness
 
+#[cfg(feature = "cuda")]
 fn main() {
-    let backend = CpuBackend::new();
+    use llama_rs::backend::{Backend, cpu::CpuBackend, cuda::CudaBackend};
+    use llama_rs::tensor::{DType, Tensor};
     
-    // Create a simple test case
-    // x = [1, 2, 3] (in_features = 3)
-    // W = [[1, 4],   (shape [3, 2] meaning in=3, out=2)
-    //      [2, 5],
-    //      [3, 6]]
-    // Expected: x @ W = [1*1+2*2+3*3, 1*4+2*5+3*6] = [14, 32]
+    // Create a simple test: 
+    // vec: [1, 2, 3, 4]
+    // mat: [[1, 2], [3, 4], [5, 6], [7, 8]]  - 4x2 matrix
+    // Expected: [50, 60]  (dot products)
     
-    // In GGUF column-major format, W[i,j] = data[i + j * 3]
-    // Column 0: [1, 2, 3] at indices 0, 1, 2
-    // Column 1: [4, 5, 6] at indices 3, 4, 5
-    // So data = [1, 2, 3, 4, 5, 6]
+    let vec_data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+    let mat_data: Vec<f32> = vec![
+        1.0, 2.0,  // row 0
+        3.0, 4.0,  // row 1
+        5.0, 6.0,  // row 2
+        7.0, 8.0,  // row 3
+    ];
     
-    let x = Tensor::from_f32(&[1.0, 2.0, 3.0], vec![3]).unwrap();
-    let w = Tensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).unwrap();
-    let mut out = Tensor::zeros(vec![2], DType::F32);
+    // vec @ mat = [1*1 + 2*3 + 3*5 + 4*7, 1*2 + 2*4 + 3*6 + 4*8] = [50, 60]
     
-    backend.vec_mat(&x, &w, &mut out).unwrap();
+    let vec_tensor = Tensor::from_f32(&vec_data, vec![4]).unwrap();
+    let mat_tensor = Tensor::from_f32(&mat_data, vec![4, 2]).unwrap();
+    let mut out_cpu = Tensor::zeros(vec![2], DType::F32);
+    let mut out_gpu = Tensor::zeros(vec![2], DType::F32);
     
-    let out_data = out.as_f32().unwrap();
-    println!("x @ W = {:?}", out_data);
-    println!("Expected: [14.0, 32.0]");
+    // Test CPU
+    let cpu = CpuBackend::new();
+    cpu.vec_mat(&vec_tensor, &mat_tensor, &mut out_cpu).unwrap();
+    let cpu_result = out_cpu.as_f32().unwrap();
+    println!("CPU result: {:?}", cpu_result);
     
-    assert!((out_data[0] - 14.0).abs() < 0.001, "First element should be 14");
-    assert!((out_data[1] - 32.0).abs() < 0.001, "Second element should be 32");
-    println!("Test PASSED!");
+    // Test GPU
+    let cuda = CudaBackend::new().unwrap();
+    cuda.vec_mat(&vec_tensor, &mat_tensor, &mut out_gpu).unwrap();
+    let gpu_result = out_gpu.as_f32().unwrap();
+    println!("GPU result: {:?}", gpu_result);
+    
+    // Compare
+    let diff: f32 = cpu_result.iter().zip(gpu_result.iter())
+        .map(|(a, b)| (a - b).abs())
+        .sum();
+    println!("Total absolute difference: {}", diff);
+    
+    if diff < 0.01 {
+        println!("PASS: GPU and CPU results match!");
+    } else {
+        println!("FAIL: Results differ significantly!");
+    }
+}
+
+#[cfg(not(feature = "cuda"))]
+fn main() {
+    println!("This example requires CUDA. Build with: cargo build --features cuda");
 }

@@ -24,6 +24,8 @@ pub struct Tensor {
     strides: Vec<usize>,
     dtype: DType,
     offset: usize,
+    /// Optional name for GPU weight lookup
+    name: Option<String>,
 }
 
 impl Tensor {
@@ -47,6 +49,7 @@ impl Tensor {
             strides,
             dtype,
             offset: 0,
+            name: None,
         })
     }
 
@@ -79,6 +82,7 @@ impl Tensor {
             strides,
             dtype,
             offset,
+            name: None,
         })
     }
 
@@ -95,6 +99,7 @@ impl Tensor {
             strides,
             dtype,
             offset: 0,
+            name: None,
         }
     }
 
@@ -139,6 +144,22 @@ impl Tensor {
     /// Get the strides
     pub fn strides(&self) -> &[usize] {
         &self.strides
+    }
+    
+    /// Get the tensor name (for GPU weight lookup)
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+    
+    /// Set the tensor name (for GPU weight lookup)
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = Some(name.into());
+    }
+    
+    /// Create a named tensor (builder pattern)
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
     }
 
     /// Get the raw byte data
@@ -228,6 +249,7 @@ impl Tensor {
             strides: new_strides,
             dtype: self.dtype,
             offset: self.offset,
+            name: self.name.clone(),
         })
     }
 
@@ -259,6 +281,7 @@ impl Tensor {
             strides: new_strides,
             dtype: self.dtype,
             offset: 0, // Reset offset since we copied the data
+            name: self.name.clone(),
         })
     }
 }

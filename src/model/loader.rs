@@ -274,7 +274,10 @@ impl ModelLoader {
         let shape: Vec<usize> = tensor_info.dims.iter().map(|&d| d as usize).collect();
         let dtype = DType::from(tensor_info.dtype);
 
-        Tensor::new(tensor_data.to_vec(), shape, dtype).ok()
+        Tensor::new(tensor_data.to_vec(), shape, dtype).ok().map(|mut t| {
+            t.set_name(name);
+            t
+        })
     }
 
     /// Load a tensor from the GGUF file
@@ -296,8 +299,12 @@ impl ModelLoader {
         // Copy the tensor data to owned storage
         // This is necessary because the GGUF file is dropped after build_model() returns
         // and the memory-mapped data would become invalid
-        Tensor::new(tensor_data.to_vec(), shape, dtype)
-            .map_err(|e| e.into())
+        let mut tensor = Tensor::new(tensor_data.to_vec(), shape, dtype)?;
+        
+        // Store the GGUF tensor name for GPU weight lookup
+        tensor.set_name(name);
+        
+        Ok(tensor)
     }
 }
 

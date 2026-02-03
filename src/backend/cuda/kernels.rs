@@ -194,14 +194,18 @@ __global__ void softmax_div(float* out, float sum_inv, int n) {
 
 // Vector-matrix multiplication: out = vec @ mat
 // vec: [k], mat: [k, n], out: [n]
+// vec_mat: y[j] = sum_i x[i] * W[i,j]
+// GGUF stores weights in column-major order: W[i,j] is at index i + j * k
+// vec: [k], mat: [k, n] (stored column-major), out: [n]
 __global__ void vec_mat_f32(const float* vec, const float* mat, float* out,
                             int k, int n) {
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (col < n) {
         float sum = 0.0f;
+        // Column-major indexing: mat[i, col] = mat[i + col * k]
         for (int i = 0; i < k; i++) {
-            sum += vec[i] * mat[i * n + col];
+            sum += vec[i] * mat[i + col * k];
         }
         out[col] = sum;
     }
