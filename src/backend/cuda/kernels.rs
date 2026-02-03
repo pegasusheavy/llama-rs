@@ -485,6 +485,97 @@ __global__ void attention_single_head(const float* q,        // [head_dim]
     }
 }
 
+// Copy a single KV pair to the cache at position pos
+// k, v: [num_kv_heads * head_dim]
+// k_cache, v_cache: [num_kv_heads * max_seq_len * head_dim]
+__global__ void update_kv_cache(const float* k, const float* v,
+                                 float* k_cache, float* v_cache,
+                                 int num_kv_heads, int head_dim,
+                                 int max_seq_len, int pos) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = num_kv_heads * head_dim;
+    
+    if (idx < total) {
+        int head = idx / head_dim;
+        int d = idx % head_dim;
+        
+        // Cache layout: [num_kv_heads, max_seq_len, head_dim]
+        int cache_idx = head * max_seq_len * head_dim + pos * head_dim + d;
+        
+        k_cache[cache_idx] = k[idx];
+        v_cache[cache_idx] = v[idx];
+    }
+}
+
+// Multi-head attention with GQA support
+// q: [num_heads * head_dim]
+// k_cache, v_cache: [num_kv_heads * max_seq_len * head_dim]
+// out: [num_heads * head_dim]
+// One block per query head
+__global__ void attention_multihead(const float* q,
+                                     const float* k_cache,
+                                     const float* v_cache,
+                                     float* out,
+                                     int num_heads, int num_kv_heads,
+                                     int head_dim, int max_seq_len,
+                                     int kv_len, float scale) {
+    extern __shared__ float shared[];
+    float* scores = shared;  // [kv_len]
+    
+    int head = blockIdx.x;
+    int tid = threadIdx.x;
+    
+    // GQA: map query head to KV head
+    int heads_per_kv = num_heads / num_kv_heads;
+    int kv_head = head / heads_per_kv;
+    
+    // Offset into Q for this head
+    const float* q_head = q + head * head_dim;
+    // Offset into KV cache for this KV head
+    const float* k_head = k_cache + kv_head * max_seq_len * head_dim;
+    const float* v_head = v_cache + kv_head * max_seq_len * head_dim;
+    
+    // Step 1: Compute attention scores (parallel over kv_len)
+    for (int pos = tid; pos < kv_len; pos += blockDim.x) {
+        float score = 0.0f;
+        for (int d = 0; d < head_dim; d++) {
+            score += q_head[d] * k_head[pos * head_dim + d];
+        }
+        scores[pos] = score * scale;
+    }
+    __syncthreads();
+    
+    // Step 2: Softmax (single thread)
+    if (tid == 0) {
+        float max_val = -MY_INFINITY;
+        for (int i = 0; i < kv_len; i++) {
+            max_val = fmaxf(max_val, scores[i]);
+        }
+        
+        float sum = 0.0f;
+        for (int i = 0; i < kv_len; i++) {
+            scores[i] = expf(scores[i] - max_val);
+            sum += scores[i];
+        }
+        
+        float inv_sum = 1.0f / sum;
+        for (int i = 0; i < kv_len; i++) {
+            scores[i] *= inv_sum;
+        }
+    }
+    __syncthreads();
+    
+    // Step 3: Weighted sum of values (parallel over head_dim)
+    float* out_head = out + head * head_dim;
+    for (int d = tid; d < head_dim; d += blockDim.x) {
+        float sum = 0.0f;
+        for (int pos = 0; pos < kv_len; pos++) {
+            sum += scores[pos] * v_head[pos * head_dim + d];
+        }
+        out_head[d] = sum;
+    }
+}
+
 } // extern "C"
 "#;
 
@@ -517,6 +608,10 @@ pub struct CudaKernels {
     // Quantized ops
     pub vec_mat_q4k: CudaFunction,
     pub vec_mat_q8_0: CudaFunction,
+    
+    // KV cache
+    pub update_kv_cache: CudaFunction,
+    pub attention_multihead: CudaFunction,
     pub vec_mat_q4_0: CudaFunction,
     
     // Attention
@@ -540,6 +635,7 @@ impl CudaKernels {
             "rope_single_pos",
             "vec_mat_q4k", "vec_mat_q8_0", "vec_mat_q4_0",
             "attention_single_head",
+            "update_kv_cache", "attention_multihead",
         ]).map_err(|e| BackendError::InitializationFailed(format!("PTX load failed: {}", e)))?;
         
         // Get function handles
@@ -576,6 +672,10 @@ impl CudaKernels {
                 .ok_or_else(|| BackendError::InitializationFailed("Kernel 'vec_mat_q4_0' not found".into()))?,
             attention_single_head: device.get_func("llama_kernels", "attention_single_head")
                 .ok_or_else(|| BackendError::InitializationFailed("Kernel 'attention_single_head' not found".into()))?,
+            update_kv_cache: device.get_func("llama_kernels", "update_kv_cache")
+                .ok_or_else(|| BackendError::InitializationFailed("Kernel 'update_kv_cache' not found".into()))?,
+            attention_multihead: device.get_func("llama_kernels", "attention_multihead")
+                .ok_or_else(|| BackendError::InitializationFailed("Kernel 'attention_multihead' not found".into()))?,
         })
     }
 }

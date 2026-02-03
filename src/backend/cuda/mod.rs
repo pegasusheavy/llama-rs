@@ -27,6 +27,8 @@ pub mod gpu_inference;
 pub mod dequant_weights;
 #[cfg(feature = "cuda")]
 pub mod fast_inference;
+#[cfg(feature = "cuda")]
+pub mod gpu_only;
 
 use crate::backend::{Backend, BackendError, BackendResult};
 use crate::tensor::{DType, Tensor};

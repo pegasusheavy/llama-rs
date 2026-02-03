@@ -18,9 +18,9 @@ pub struct FastGpuInference {
     weights: GpuWeightStore,
     config: InferenceConfig,
     pos: usize,
-    // KV cache per layer
-    k_cache: Vec<Vec<f32>>,  // [layer][num_kv_heads * max_seq_len * head_dim]
-    v_cache: Vec<Vec<f32>>,
+    // GPU KV cache per layer
+    k_cache: Vec<CudaSlice<f32>>,  // [layer] -> [num_kv_heads * max_seq_len * head_dim]
+    v_cache: Vec<CudaSlice<f32>>,
 }
 
 #[derive(Clone)]
@@ -78,10 +78,14 @@ impl FastGpuInference {
             use_neox_rope: use_neox,
         };
         
-        // Initialize KV cache
+        // Initialize GPU KV cache
         let kv_size = cfg.num_kv_heads * max_seq_len * cfg.head_dim;
-        let k_cache: Vec<Vec<f32>> = (0..cfg.num_layers).map(|_| vec![0.0; kv_size]).collect();
-        let v_cache: Vec<Vec<f32>> = (0..cfg.num_layers).map(|_| vec![0.0; kv_size]).collect();
+        let mut k_cache = Vec::with_capacity(cfg.num_layers);
+        let mut v_cache = Vec::with_capacity(cfg.num_layers);
+        for _ in 0..cfg.num_layers {
+            k_cache.push(device.alloc_zeros(kv_size).map_err(|e| BackendError::AllocationFailed(format!("{}", e)))?);
+            v_cache.push(device.alloc_zeros(kv_size).map_err(|e| BackendError::AllocationFailed(format!("{}", e)))?);
+        }
         
         let vram_mb = weights.vram_usage() as f64 / (1024.0 * 1024.0);
         eprintln!("Fast GPU inference ready: {:.1} MB VRAM", vram_mb);
@@ -121,11 +125,14 @@ impl FastGpuInference {
     /// Reset for new sequence
     pub fn reset(&mut self) {
         self.pos = 0;
+        // Zero out GPU KV caches
+        let kv_size = self.config.num_kv_heads * self.config.max_seq_len * self.config.head_dim;
+        let zeros = vec![0.0f32; kv_size];
         for k in &mut self.k_cache {
-            k.fill(0.0);
+            let _ = self.device.htod_sync_copy_into(&zeros, k);
         }
         for v in &mut self.v_cache {
-            v.fill(0.0);
+            let _ = self.device.htod_sync_copy_into(&zeros, v);
         }
     }
     
@@ -161,14 +168,14 @@ impl FastGpuInference {
         let v = self.linear_cpu(&hidden_norm, &format!("{}.attn_v.weight", prefix),
                                 Some(&format!("{}.attn_v.bias", prefix)))?;
         
-        // Apply RoPE
+        // Apply RoPE (on CPU for now - small data)
         let (q, k) = self.apply_rope_cpu(q, k)?;
         
-        // Update KV cache
-        self.update_kv_cache(layer_idx, &k, &v);
+        // Update KV cache (GPU)
+        self.update_kv_cache_gpu(layer_idx, &k, &v)?;
         
-        // Compute attention
-        let attn_out = self.compute_attention_cpu(layer_idx, &q)?;
+        // Compute attention (GPU)
+        let attn_out = self.compute_attention_gpu(layer_idx, &q)?;
         
         // Output projection
         let attn_proj = self.linear_cpu(&attn_out, &format!("{}.attn_output.weight", prefix), None)?;
@@ -308,72 +315,77 @@ impl FastGpuInference {
         Ok((q, k))
     }
     
-    fn update_kv_cache(&mut self, layer_idx: usize, k: &[f32], v: &[f32]) {
+    fn update_kv_cache_gpu(&mut self, layer_idx: usize, k: &[f32], v: &[f32]) -> BackendResult<()> {
         let cfg = &self.config;
-        let head_dim = cfg.head_dim;
         let num_kv_heads = cfg.num_kv_heads;
+        let head_dim = cfg.head_dim;
         let max_seq_len = cfg.max_seq_len;
+        let total = num_kv_heads * head_dim;
         
-        for h in 0..num_kv_heads {
-            let src_offset = h * head_dim;
-            let dst_offset = h * max_seq_len * head_dim + self.pos * head_dim;
-            
-            self.k_cache[layer_idx][dst_offset..dst_offset + head_dim]
-                .copy_from_slice(&k[src_offset..src_offset + head_dim]);
-            self.v_cache[layer_idx][dst_offset..dst_offset + head_dim]
-                .copy_from_slice(&v[src_offset..src_offset + head_dim]);
-        }
+        // Upload K and V to temp GPU buffers
+        let k_gpu = self.device.htod_sync_copy(k)
+            .map_err(|e| BackendError::AllocationFailed(format!("{}", e)))?;
+        let v_gpu = self.device.htod_sync_copy(v)
+            .map_err(|e| BackendError::AllocationFailed(format!("{}", e)))?;
+        
+        // Launch KV cache update kernel
+        let config = LaunchConfig {
+            grid_dim: (((total + 255) / 256) as u32, 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        
+        unsafe {
+            self.kernels.update_kv_cache.clone().launch(
+                config,
+                (&k_gpu, &v_gpu, 
+                 &mut self.k_cache[layer_idx], &mut self.v_cache[layer_idx],
+                 num_kv_heads as i32, head_dim as i32,
+                 max_seq_len as i32, self.pos as i32)
+            )
+        }.map_err(|e| BackendError::OperationFailed(format!("{}", e)))?;
+        
+        Ok(())
     }
     
-    fn compute_attention_cpu(&self, layer_idx: usize, q: &[f32]) -> BackendResult<Vec<f32>> {
+    fn compute_attention_gpu(&self, layer_idx: usize, q: &[f32]) -> BackendResult<Vec<f32>> {
         let cfg = &self.config;
-        let head_dim = cfg.head_dim;
         let num_heads = cfg.num_heads;
         let num_kv_heads = cfg.num_kv_heads;
+        let head_dim = cfg.head_dim;
+        let max_seq_len = cfg.max_seq_len;
         let kv_len = self.pos + 1;
         let scale = 1.0 / (head_dim as f32).sqrt();
         
-        let heads_per_kv = num_heads / num_kv_heads;
-        let mut attn_out = vec![0.0f32; cfg.hidden_size];
+        // Upload Q to GPU
+        let q_gpu = self.device.htod_sync_copy(q)
+            .map_err(|e| BackendError::AllocationFailed(format!("{}", e)))?;
         
-        for h in 0..num_heads {
-            let kv_h = h / heads_per_kv;
-            let q_offset = h * head_dim;
-            
-            // Compute scores
-            let mut scores = vec![0.0f32; kv_len];
-            for pos in 0..kv_len {
-                let k_offset = kv_h * cfg.max_seq_len * head_dim + pos * head_dim;
-                let mut dot = 0.0f32;
-                for d in 0..head_dim {
-                    dot += q[q_offset + d] * self.k_cache[layer_idx][k_offset + d];
-                }
-                scores[pos] = dot * scale;
-            }
-            
-            // Softmax
-            let max_score = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let mut sum = 0.0f32;
-            for s in &mut scores {
-                *s = (*s - max_score).exp();
-                sum += *s;
-            }
-            for s in &mut scores {
-                *s /= sum;
-            }
-            
-            // Weighted sum
-            let out_offset = h * head_dim;
-            for d in 0..head_dim {
-                let mut val = 0.0f32;
-                for pos in 0..kv_len {
-                    let v_offset = kv_h * cfg.max_seq_len * head_dim + pos * head_dim + d;
-                    val += scores[pos] * self.v_cache[layer_idx][v_offset];
-                }
-                attn_out[out_offset + d] = val;
-            }
-        }
+        // Allocate output
+        let mut out_gpu = self.device.alloc_zeros::<f32>(num_heads * head_dim)
+            .map_err(|e| BackendError::AllocationFailed(format!("{}", e)))?;
         
-        Ok(attn_out)
+        // Launch multi-head attention kernel
+        // One block per head, threads work on kv_len and head_dim
+        let config = LaunchConfig {
+            grid_dim: (num_heads as u32, 1, 1),
+            block_dim: (256.min(kv_len) as u32, 1, 1),
+            shared_mem_bytes: (kv_len * 4) as u32,  // Space for attention scores
+        };
+        
+        unsafe {
+            self.kernels.attention_multihead.clone().launch(
+                config,
+                (&q_gpu, &self.k_cache[layer_idx], &self.v_cache[layer_idx],
+                 &mut out_gpu,
+                 num_heads as i32, num_kv_heads as i32,
+                 head_dim as i32, max_seq_len as i32,
+                 kv_len as i32, scale)
+            )
+        }.map_err(|e| BackendError::OperationFailed(format!("{}", e)))?;
+        
+        // Download result
+        self.device.dtoh_sync_copy(&out_gpu)
+            .map_err(|e| BackendError::OperationFailed(format!("{}", e)))
     }
 }
