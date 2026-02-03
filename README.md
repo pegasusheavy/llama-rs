@@ -169,15 +169,17 @@ cargo build --release --features server
 
 ## Performance
 
-Benchmarked on AMD Ryzen 9 with AVX2:
+Benchmarked on Intel i9-13900K (24 cores, AVX2) with 64GB RAM:
 
-| Model | Quantization | Tokens/sec |
-|-------|--------------|------------|
-| Qwen2.5-0.5B | Q4_K_M | ~45 t/s |
-| TinyLlama-1.1B | Q4_K_M | ~25 t/s |
-| Mistral-7B | Q4_K_M | ~8 t/s |
+| Model | Quantization | Tokens/sec | Notes |
+|-------|--------------|------------|-------|
+| Qwen2.5-0.5B | Q4_K_M | ~1.2 t/s | 896 hidden dim |
+| TinyLlama-1.1B | Q4_K_M | ~1.5 t/s | 2048 hidden dim |
+| Mistral-7B | Q4_K_M | ~0.3 t/s | 4096 hidden dim |
 
-Performance varies by hardware, model size, and quantization.
+*Current implementation prioritizes correctness over speed. Performance optimizations (batch processing, better SIMD utilization) are planned.*
+
+Performance varies by hardware, model size, context length, and quantization.
 
 ## Contributing
 
