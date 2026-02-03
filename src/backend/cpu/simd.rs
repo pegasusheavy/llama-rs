@@ -219,7 +219,16 @@ pub fn fma_f32(a: &[f32], b: &[f32], c: &[f32], out: &mut [f32]) {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe {
+            fma_f32_neon(a, b, c, out);
+        }
+        return;
+    }
+
     // Scalar fallback
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     for i in 0..a.len() {
         out[i] = a[i] * b[i] + c[i];
     }
@@ -246,6 +255,25 @@ unsafe fn fma_f32_avx2(a: &[f32], b: &[f32], c: &[f32], out: &mut [f32]) {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe fn fma_f32_neon(a: &[f32], b: &[f32], c: &[f32], out: &mut [f32]) {
+    let n = a.len();
+    let chunks = n / 4;
+
+    for i in 0..chunks {
+        let offset = i * 4;
+        let va = vld1q_f32(a.as_ptr().add(offset));
+        let vb = vld1q_f32(b.as_ptr().add(offset));
+        let vc = vld1q_f32(c.as_ptr().add(offset));
+        let result = vfmaq_f32(vc, va, vb);
+        vst1q_f32(out.as_mut_ptr().add(offset), result);
+    }
+
+    for i in (chunks * 4)..n {
+        out[i] = a[i] * b[i] + c[i];
+    }
+}
+
 /// Scale a vector: out = a * scalar
 pub fn scale_f32(a: &[f32], scalar: f32, out: &mut [f32]) {
     debug_assert_eq!(a.len(), out.len());
@@ -260,7 +288,16 @@ pub fn scale_f32(a: &[f32], scalar: f32, out: &mut [f32]) {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe {
+            scale_f32_neon(a, scalar, out);
+        }
+        return;
+    }
+
     // Scalar fallback
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     for i in 0..a.len() {
         out[i] = a[i] * scalar;
     }
@@ -285,6 +322,24 @@ unsafe fn scale_f32_avx2(a: &[f32], scalar: f32, out: &mut [f32]) {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe fn scale_f32_neon(a: &[f32], scalar: f32, out: &mut [f32]) {
+    let n = a.len();
+    let chunks = n / 4;
+    let vscalar = vdupq_n_f32(scalar);
+
+    for i in 0..chunks {
+        let offset = i * 4;
+        let va = vld1q_f32(a.as_ptr().add(offset));
+        let result = vmulq_f32(va, vscalar);
+        vst1q_f32(out.as_mut_ptr().add(offset), result);
+    }
+
+    for i in (chunks * 4)..n {
+        out[i] = a[i] * scalar;
+    }
+}
+
 /// Sum all elements in a slice
 pub fn sum_f32(a: &[f32]) -> f32 {
     #[cfg(target_arch = "x86_64")]
@@ -292,8 +347,15 @@ pub fn sum_f32(a: &[f32]) -> f32 {
         if has_avx2() {
             return unsafe { sum_f32_avx2(a) };
         }
+        return a.iter().sum();
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        return unsafe { sum_f32_neon(a) };
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     a.iter().sum()
 }
 
@@ -319,6 +381,27 @@ unsafe fn sum_f32_avx2(a: &[f32]) -> f32 {
     result
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe fn sum_f32_neon(a: &[f32]) -> f32 {
+    let n = a.len();
+    let chunks = n / 4;
+    let mut sum = vdupq_n_f32(0.0);
+
+    for i in 0..chunks {
+        let offset = i * 4;
+        let va = vld1q_f32(a.as_ptr().add(offset));
+        sum = vaddq_f32(sum, va);
+    }
+
+    let mut result = vaddvq_f32(sum);
+
+    for i in (chunks * 4)..n {
+        result += a[i];
+    }
+
+    result
+}
+
 /// Find maximum value in a slice
 pub fn max_f32(a: &[f32]) -> f32 {
     #[cfg(target_arch = "x86_64")]
@@ -326,8 +409,15 @@ pub fn max_f32(a: &[f32]) -> f32 {
         if has_avx2() {
             return unsafe { max_f32_avx2(a) };
         }
+        return a.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        return unsafe { max_f32_neon(a) };
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     a.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
 }
 
@@ -367,6 +457,31 @@ unsafe fn max_f32_avx2(a: &[f32]) -> f32 {
     result
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe fn max_f32_neon(a: &[f32]) -> f32 {
+    let n = a.len();
+    if n == 0 {
+        return f32::NEG_INFINITY;
+    }
+
+    let chunks = n / 4;
+    let mut vmax = vdupq_n_f32(f32::NEG_INFINITY);
+
+    for i in 0..chunks {
+        let offset = i * 4;
+        let va = vld1q_f32(a.as_ptr().add(offset));
+        vmax = vmaxq_f32(vmax, va);
+    }
+
+    let mut result = vmaxvq_f32(vmax);
+
+    for i in (chunks * 4)..n {
+        result = result.max(a[i]);
+    }
+
+    result
+}
+
 // =============================================================================
 // Softmax (SIMD-optimized)
 // =============================================================================
@@ -391,16 +506,27 @@ pub fn softmax_inplace(x: &mut [f32]) {
         }
     }
 
-    // Scalar fallback
-    let mut sum = 0.0f32;
-    for v in x.iter_mut() {
-        *v = (*v - max_val).exp();
-        sum += *v;
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe {
+            softmax_inplace_neon(x, max_val);
+        }
+        return;
     }
 
-    let inv_sum = 1.0 / sum;
-    for v in x.iter_mut() {
-        *v *= inv_sum;
+    // Scalar fallback
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let mut sum = 0.0f32;
+        for v in x.iter_mut() {
+            *v = (*v - max_val).exp();
+            sum += *v;
+        }
+
+        let inv_sum = 1.0 / sum;
+        for v in x.iter_mut() {
+            *v *= inv_sum;
+        }
     }
 }
 
@@ -435,6 +561,34 @@ unsafe fn softmax_inplace_avx2(x: &mut [f32], max_val: f32) {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe fn softmax_inplace_neon(x: &mut [f32], max_val: f32) {
+    let n = x.len();
+
+    // Compute exp(x - max) - still use scalar for exp() as NEON doesn't have native exp
+    let mut sum = 0.0f32;
+    for v in x.iter_mut() {
+        *v = (*v - max_val).exp();
+        sum += *v;
+    }
+
+    // Divide by sum using NEON
+    let inv_sum = 1.0 / sum;
+    let vinv = vdupq_n_f32(inv_sum);
+    let chunks = n / 4;
+
+    for i in 0..chunks {
+        let offset = i * 4;
+        let vx = vld1q_f32(x.as_ptr().add(offset));
+        let result = vmulq_f32(vx, vinv);
+        vst1q_f32(x.as_mut_ptr().add(offset), result);
+    }
+
+    for i in (chunks * 4)..n {
+        x[i] *= inv_sum;
+    }
+}
+
 // =============================================================================
 // RMS Norm (SIMD-optimized)
 // =============================================================================
@@ -446,8 +600,15 @@ pub fn sum_of_squares(x: &[f32]) -> f32 {
         if has_avx2() {
             return unsafe { sum_of_squares_avx2(x) };
         }
+        return x.iter().map(|&v| v * v).sum();
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        return unsafe { sum_of_squares_neon(x) };
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     x.iter().map(|&v| v * v).sum()
 }
 
@@ -467,6 +628,27 @@ unsafe fn sum_of_squares_avx2(x: &[f32]) -> f32 {
     let mut result = hsum_avx2(sum);
 
     for i in (chunks * 8)..n {
+        result += x[i] * x[i];
+    }
+
+    result
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn sum_of_squares_neon(x: &[f32]) -> f32 {
+    let n = x.len();
+    let chunks = n / 4;
+    let mut sum = vdupq_n_f32(0.0);
+
+    for i in 0..chunks {
+        let offset = i * 4;
+        let vx = vld1q_f32(x.as_ptr().add(offset));
+        sum = vfmaq_f32(sum, vx, vx);
+    }
+
+    let mut result = vaddvq_f32(sum);
+
+    for i in (chunks * 4)..n {
         result += x[i] * x[i];
     }
 
@@ -493,7 +675,16 @@ pub fn rms_norm(x: &[f32], weight: &[f32], eps: f32, out: &mut [f32]) {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe {
+            rms_norm_neon(x, weight, inv_rms, out);
+        }
+        return;
+    }
+
     // Scalar fallback
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     for i in 0..n {
         out[i] = x[i] * inv_rms * weight[i];
     }
@@ -520,6 +711,26 @@ unsafe fn rms_norm_avx2(x: &[f32], weight: &[f32], inv_rms: f32, out: &mut [f32]
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+unsafe fn rms_norm_neon(x: &[f32], weight: &[f32], inv_rms: f32, out: &mut [f32]) {
+    let n = x.len();
+    let chunks = n / 4;
+    let vinv_rms = vdupq_n_f32(inv_rms);
+
+    for i in 0..chunks {
+        let offset = i * 4;
+        let vx = vld1q_f32(x.as_ptr().add(offset));
+        let vw = vld1q_f32(weight.as_ptr().add(offset));
+        let scaled = vmulq_f32(vx, vinv_rms);
+        let result = vmulq_f32(scaled, vw);
+        vst1q_f32(out.as_mut_ptr().add(offset), result);
+    }
+
+    for i in (chunks * 4)..n {
+        out[i] = x[i] * inv_rms * weight[i];
+    }
+}
+
 // =============================================================================
 // Quantized Dot Product (SIMD-optimized Q4_0)
 // =============================================================================
@@ -533,9 +744,16 @@ pub fn dot_q4_0(weights: &[BlockQ4_0], x: &[f32]) -> f32 {
         if has_avx2() {
             return unsafe { dot_q4_0_avx2(weights, x) };
         }
+        return dot_q4_0_scalar(weights, x);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        return unsafe { dot_q4_0_neon(weights, x) };
     }
 
     // Scalar fallback
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     dot_q4_0_scalar(weights, x)
 }
 
@@ -601,6 +819,52 @@ unsafe fn dot_q4_0_avx2(weights: &[BlockQ4_0], x: &[f32]) -> f32 {
     }
 
     hsum_avx2(sum)
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn dot_q4_0_neon(weights: &[BlockQ4_0], x: &[f32]) -> f32 {
+    let mut sum = vdupq_n_f32(0.0);
+    let mut offset = 0;
+
+    for block in weights {
+        let d = block.d.to_f32();
+        let vd = vdupq_n_f32(d);
+
+        // Process 4 elements at a time from each half (lo/hi nibbles)
+        // Each block has 16 bytes = 32 nibbles = 32 values
+        for chunk in 0..4 {
+            let chunk_offset = chunk * 4;
+            
+            // Extract 4 lo nibbles and 4 hi nibbles
+            let mut lo_vals = [0.0f32; 4];
+            let mut hi_vals = [0.0f32; 4];
+            
+            for i in 0..4 {
+                let byte = block.qs[chunk_offset + i];
+                lo_vals[i] = ((byte & 0x0F) as i32 - 8) as f32;
+                hi_vals[i] = (((byte >> 4) & 0x0F) as i32 - 8) as f32;
+            }
+            
+            // Load x values
+            let x_lo = vld1q_f32(x.as_ptr().add(offset + chunk_offset));
+            let x_hi = vld1q_f32(x.as_ptr().add(offset + chunk_offset + 16));
+            
+            // Load quantized values as f32
+            let q_lo = vld1q_f32(lo_vals.as_ptr());
+            let q_hi = vld1q_f32(hi_vals.as_ptr());
+            
+            // Compute: sum += d * q * x
+            let scaled_lo = vmulq_f32(q_lo, vd);
+            let scaled_hi = vmulq_f32(q_hi, vd);
+            
+            sum = vfmaq_f32(sum, scaled_lo, x_lo);
+            sum = vfmaq_f32(sum, scaled_hi, x_hi);
+        }
+
+        offset += 32;
+    }
+
+    vaddvq_f32(sum)
 }
 
 // =============================================================================

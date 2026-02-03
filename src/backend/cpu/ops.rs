@@ -51,7 +51,14 @@ fn add_f32_simd(a: &[f32], b: &[f32], out: &mut [f32]) {
         return;
     }
     
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { add_f32_neon(a, b, out) };
+        return;
+    }
+    
     // Scalar fallback
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     for ((o, &a_val), &b_val) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
         *o = a_val + b_val;
     }
@@ -83,6 +90,30 @@ unsafe fn add_f32_avx2(a: &[f32], b: &[f32], out: &mut [f32]) { unsafe {
     }
 }}
 
+#[cfg(target_arch = "aarch64")]
+unsafe fn add_f32_neon(a: &[f32], b: &[f32], out: &mut [f32]) {
+    use std::arch::aarch64::*;
+    
+    let n = a.len();
+    let chunks = n / 4;
+    
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+    let out_ptr = out.as_mut_ptr();
+    
+    for i in 0..chunks {
+        let offset = i * 4;
+        let va = vld1q_f32(a_ptr.add(offset));
+        let vb = vld1q_f32(b_ptr.add(offset));
+        let vr = vaddq_f32(va, vb);
+        vst1q_f32(out_ptr.add(offset), vr);
+    }
+    
+    for i in (chunks * 4)..n {
+        *out.get_unchecked_mut(i) = *a.get_unchecked(i) + *b.get_unchecked(i);
+    }
+}
+
 /// Element-wise multiplication: out = a * b
 pub fn mul(a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
     check_same_shape(a, b)?;
@@ -113,6 +144,13 @@ fn mul_f32_simd(a: &[f32], b: &[f32], out: &mut [f32]) {
         return;
     }
     
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { mul_f32_neon(a, b, out) };
+        return;
+    }
+    
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     for ((o, &a_val), &b_val) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
         *o = a_val * b_val;
     }
@@ -143,6 +181,30 @@ unsafe fn mul_f32_avx2(a: &[f32], b: &[f32], out: &mut [f32]) { unsafe {
     }
 }}
 
+#[cfg(target_arch = "aarch64")]
+unsafe fn mul_f32_neon(a: &[f32], b: &[f32], out: &mut [f32]) {
+    use std::arch::aarch64::*;
+    
+    let n = a.len();
+    let chunks = n / 4;
+    
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+    let out_ptr = out.as_mut_ptr();
+    
+    for i in 0..chunks {
+        let offset = i * 4;
+        let va = vld1q_f32(a_ptr.add(offset));
+        let vb = vld1q_f32(b_ptr.add(offset));
+        let vr = vmulq_f32(va, vb);
+        vst1q_f32(out_ptr.add(offset), vr);
+    }
+    
+    for i in (chunks * 4)..n {
+        *out.get_unchecked_mut(i) = *a.get_unchecked(i) * *b.get_unchecked(i);
+    }
+}
+
 /// Scale by scalar: out = a * scalar
 pub fn scale(a: &Tensor, scalar: f32, out: &mut Tensor) -> BackendResult<()> {
     check_same_shape(a, out)?;
@@ -171,6 +233,13 @@ fn scale_f32_simd(a: &[f32], scalar: f32, out: &mut [f32]) {
         return;
     }
     
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { scale_f32_neon(a, scalar, out) };
+        return;
+    }
+    
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     for (o, &a_val) in out.iter_mut().zip(a.iter()) {
         *o = a_val * scalar;
     }
@@ -199,6 +268,29 @@ unsafe fn scale_f32_avx2(a: &[f32], scalar: f32, out: &mut [f32]) { unsafe {
         *out.get_unchecked_mut(i) = *a.get_unchecked(i) * scalar;
     }
 }}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn scale_f32_neon(a: &[f32], scalar: f32, out: &mut [f32]) {
+    use std::arch::aarch64::*;
+    
+    let n = a.len();
+    let chunks = n / 4;
+    let vscalar = vdupq_n_f32(scalar);
+    
+    let a_ptr = a.as_ptr();
+    let out_ptr = out.as_mut_ptr();
+    
+    for i in 0..chunks {
+        let offset = i * 4;
+        let va = vld1q_f32(a_ptr.add(offset));
+        let vr = vmulq_f32(va, vscalar);
+        vst1q_f32(out_ptr.add(offset), vr);
+    }
+    
+    for i in (chunks * 4)..n {
+        *out.get_unchecked_mut(i) = *a.get_unchecked(i) * scalar;
+    }
+}
 
 // =============================================================================
 // Activation Functions
