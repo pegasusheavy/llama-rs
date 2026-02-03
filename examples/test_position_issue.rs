@@ -1,11 +1,11 @@
 //! Test if the issue is specifically with position 1.
 
-use llama_cpp_rs::backend::cpu::CpuBackend;
-use llama_cpp_rs::backend::Backend;
-use llama_cpp_rs::model::{InferenceContext, Model, ModelLoader};
+use llama_gguf::backend::cpu::CpuBackend;
+use llama_gguf::backend::Backend;
+use llama_gguf::model::{InferenceContext, Model, ModelLoader};
 use std::sync::Arc;
 
-fn test_position(model: &dyn Model, backend: Arc<dyn Backend>, config: &llama_cpp_rs::model::ModelConfig, tokens: &[u32], desc: &str) {
+fn test_position(model: &dyn Model, backend: Arc<dyn Backend>, config: &llama_gguf::model::ModelConfig, tokens: &[u32], desc: &str) {
     let mut ctx = InferenceContext::new(config, backend);
     let logits = model.forward(tokens, &mut ctx).expect("Forward failed");
     

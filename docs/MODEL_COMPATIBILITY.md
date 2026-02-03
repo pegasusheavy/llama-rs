@@ -1,10 +1,10 @@
 # Model Compatibility
 
-This document tracks GGUF models that have been tested with llama-cpp-rs.
+This document tracks GGUF models that have been tested with llama-gguf.
 
 ## Supported Architectures
 
-llama-cpp-rs currently supports models that use LLaMA-style tensor naming conventions:
+llama-gguf currently supports models that use LLaMA-style tensor naming conventions:
 
 | Architecture | Status | Notes |
 |--------------|--------|-------|
@@ -74,16 +74,16 @@ Use the built-in download command to fetch models from HuggingFace:
 
 ```bash
 # List available files in a repository
-llama-cpp-rs download Qwen/Qwen2.5-0.5B-Instruct-GGUF
+llama-gguf download Qwen/Qwen2.5-0.5B-Instruct-GGUF
 
 # Download a specific file
-llama-cpp-rs download Qwen/Qwen2.5-0.5B-Instruct-GGUF --file qwen2.5-0.5b-instruct-q4_k_m.gguf
+llama-gguf download Qwen/Qwen2.5-0.5B-Instruct-GGUF --file qwen2.5-0.5b-instruct-q4_k_m.gguf
 
 # Search for models
-llama-cpp-rs models search "llama gguf"
+llama-gguf models search "llama gguf"
 
 # List cached models
-llama-cpp-rs models list
+llama-gguf models list
 ```
 
 ## Model Features
@@ -135,10 +135,10 @@ Models with fewer KV heads than query heads are supported:
 
 To test a new model:
 
-1. Download using `llama-cpp-rs download <repo>`
-2. Check model info with `llama-cpp-rs info <path>`
+1. Download using `llama-gguf download <repo>`
+2. Check model info with `llama-gguf info <path>`
 3. Verify architecture is LLaMA-compatible
-4. Test inference with `llama-cpp-rs run <path> --prompt "test"`
+4. Test inference with `llama-gguf run <path> --prompt "test"`
 
 Report compatibility results by opening an issue on GitHub.
 
@@ -147,23 +147,23 @@ Report compatibility results by opening an issue on GitHub.
 ### Qwen2.5-0.5B-Instruct (Q4_K_M)
 
 ```bash
-$ llama-cpp-rs run qwen2.5-0.5b-instruct-q4_k_m.gguf -p "1+1=" -n 3 --temperature 0
+$ llama-gguf run qwen2.5-0.5b-instruct-q4_k_m.gguf -p "1+1=" -n 3 --temperature 0
 1+1=2, 
 
-$ llama-cpp-rs run qwen2.5-0.5b-instruct-q4_k_m.gguf -p "2+2=" -n 3 --temperature 0
+$ llama-gguf run qwen2.5-0.5b-instruct-q4_k_m.gguf -p "2+2=" -n 3 --temperature 0
 2+2=4, 
 
-$ llama-cpp-rs run qwen2.5-0.5b-instruct-q4_k_m.gguf -p "The capital of France is" -n 10 --temperature 0
+$ llama-gguf run qwen2.5-0.5b-instruct-q4_k_m.gguf -p "The capital of France is" -n 10 --temperature 0
 The capital of France is____. A. Paris
 ```
 
 ### Qwen2.5-1.5B-Instruct (Q4_K_M)
 
 ```bash
-$ llama-cpp-rs run qwen2.5-1.5b-instruct-q4_k_m.gguf -p "1+1=" -n 5 --temperature 0
+$ llama-gguf run qwen2.5-1.5b-instruct-q4_k_m.gguf -p "1+1=" -n 5 --temperature 0
 1+1=2 is a basic principle
 
-$ llama-cpp-rs run qwen2.5-1.5b-instruct-q4_k_m.gguf -p "The capital of Germany is" -n 10 --temperature 0
+$ llama-gguf run qwen2.5-1.5b-instruct-q4_k_m.gguf -p "The capital of Germany is" -n 10 --temperature 0
 The capital of Germany is______. A. Berlin
 ```
 
@@ -172,7 +172,7 @@ Both Qwen models correctly predict arithmetic results and generate coherent text
 ### TinyLlama-1.1B-Chat (Q4_K_M)
 
 ```bash
-$ llama-cpp-rs run tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf -p "1+1=" -n 8 --temperature 0
+$ llama-gguf run tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf -p "1+1=" -n 8 --temperature 0
 1+1=2.
 The first number is the
 ```
@@ -180,7 +180,7 @@ The first number is the
 ### DeepSeek-Coder-1.3B (Q4_K_M)
 
 ```bash
-$ llama-cpp-rs run deepseek-coder-1.3b-instruct.Q4_K_M.gguf -p "def fibonacci(n):" -n 30 --temperature 0
+$ llama-gguf run deepseek-coder-1.3b-instruct.Q4_K_M.gguf -p "def fibonacci(n):" -n 30 --temperature 0
 def fibonacci(n):
     if n <= 1 : 
    return (0, []) # base case for the recursion
@@ -189,7 +189,7 @@ def fibonacci(n):
 ### Mistral-7B-Instruct (Q4_K_M)
 
 ```bash
-$ llama-cpp-rs run mistral-7b-instruct-v0.2.Q4_K_M.gguf -p "[INST] What is 1+1? [/INST]" -n 20 --temperature 0
+$ llama-gguf run mistral-7b-instruct-v0.2.Q4_K_M.gguf -p "[INST] What is 1+1? [/INST]" -n 20 --temperature 0
 [INST] What is 1+1? [/INST] The answer to the expression "1 + 1" is 2. In mathematics, this
 ```
 
@@ -197,6 +197,6 @@ Note: Mistral and other instruction-tuned models work best with proper prompt fo
 
 ## Test Environment
 
-- **llama-cpp-rs version**: 0.1.0
+- **llama-gguf version**: 0.1.0
 - **Test date**: February 2026
 - **Platform**: Linux x86_64

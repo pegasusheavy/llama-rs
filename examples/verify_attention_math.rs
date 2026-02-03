@@ -1,8 +1,8 @@
 //! Verify attention computation produces mathematically correct results.
 
-use llama_cpp_rs::backend::cpu::CpuBackend;
-use llama_cpp_rs::backend::Backend;
-use llama_cpp_rs::tensor::{DType, Tensor};
+use llama_gguf::backend::cpu::CpuBackend;
+use llama_gguf::backend::Backend;
+use llama_gguf::tensor::{DType, Tensor};
 
 fn main() {
     let backend = CpuBackend::new();

@@ -1,9 +1,9 @@
 //! Trace through full layer 0 with 4 tokens to debug attention
 
-use llama_cpp_rs::backend::cpu::CpuBackend;
-use llama_cpp_rs::backend::Backend;
-use llama_cpp_rs::gguf::GgufFile;
-use llama_cpp_rs::tensor::{DType, Tensor};
+use llama_gguf::backend::cpu::CpuBackend;
+use llama_gguf::backend::Backend;
+use llama_gguf::gguf::GgufFile;
+use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
 
 fn load_tensor(gguf: &GgufFile, name: &str) -> Tensor {

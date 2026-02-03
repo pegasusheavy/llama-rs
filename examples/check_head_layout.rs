@@ -3,10 +3,10 @@
 //! Contiguous: [head0_dim0, head0_dim1, ..., head0_dim63, head1_dim0, ...]
 //! Interleaved: [head0_dim0, head1_dim0, ..., headN_dim0, head0_dim1, ...]
 
-use llama_cpp_rs::backend::cpu::CpuBackend;
-use llama_cpp_rs::backend::Backend;
-use llama_cpp_rs::gguf::GgufFile;
-use llama_cpp_rs::tensor::{DType, Tensor};
+use llama_gguf::backend::cpu::CpuBackend;
+use llama_gguf::backend::Backend;
+use llama_gguf::gguf::GgufFile;
+use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
 
 fn main() {

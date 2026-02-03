@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use llama_cpp_rs::{GgufFile, default_backend};
+//! use llama_gguf::{GgufFile, default_backend};
 //!
 //! // Load a GGUF model
 //! let file = GgufFile::open("model.gguf").unwrap();

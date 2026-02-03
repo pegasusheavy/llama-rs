@@ -2,9 +2,9 @@
 
 #[cfg(feature = "cuda")]
 fn main() {
-    use llama_cpp_rs::backend::cuda::CudaBackend;
-    use llama_cpp_rs::backend::Backend;
-    use llama_cpp_rs::tensor::{Tensor, DType};
+    use llama_gguf::backend::cuda::CudaBackend;
+    use llama_gguf::backend::Backend;
+    use llama_gguf::tensor::{Tensor, DType};
     
     println!("Testing CUDA backend...");
     println!();

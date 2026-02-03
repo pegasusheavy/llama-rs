@@ -1,4 +1,4 @@
-# llama-cpp-rs
+# llama-gguf
 
 A high-performance Rust implementation of [llama.cpp](https://github.com/ggerganov/llama.cpp) - an LLM inference engine with full GGUF support.
 
@@ -18,12 +18,12 @@ A high-performance Rust implementation of [llama.cpp](https://github.com/ggergan
 ### From Source
 
 ```bash
-git clone https://github.com/pegasusheavy/llama-cpp-rs.git
-cd llama-cpp-rs
+git clone https://github.com/pegasusheavy/llama-gguf.git
+cd llama-gguf
 cargo build --release
 ```
 
-The binary will be at `target/release/llama-cpp-rs`.
+The binary will be at `target/release/llama-gguf`.
 
 ### As a Library
 
@@ -31,7 +31,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-llama-cpp-rs = { git = "https://github.com/pegasusheavy/llama-cpp-rs.git" }
+llama-gguf = { git = "https://github.com/pegasusheavy/llama-gguf.git" }
 ```
 
 ## Quick Start
@@ -40,29 +40,29 @@ llama-cpp-rs = { git = "https://github.com/pegasusheavy/llama-cpp-rs.git" }
 
 ```bash
 # List available files in a repository
-llama-cpp-rs download Qwen/Qwen2.5-0.5B-Instruct-GGUF
+llama-gguf download Qwen/Qwen2.5-0.5B-Instruct-GGUF
 
 # Download a specific quantized model
-llama-cpp-rs download Qwen/Qwen2.5-0.5B-Instruct-GGUF -f qwen2.5-0.5b-instruct-q4_k_m.gguf
+llama-gguf download Qwen/Qwen2.5-0.5B-Instruct-GGUF -f qwen2.5-0.5b-instruct-q4_k_m.gguf
 ```
 
 ### Run Inference
 
 ```bash
 # Basic text generation
-llama-cpp-rs run model.gguf -p "Hello, world!" -n 50
+llama-gguf run model.gguf -p "Hello, world!" -n 50
 
 # With sampling parameters
-llama-cpp-rs run model.gguf -p "Once upon a time" -n 100 --temperature 0.8 --top-k 40
+llama-gguf run model.gguf -p "Once upon a time" -n 100 --temperature 0.8 --top-k 40
 
 # Deterministic output (greedy sampling)
-llama-cpp-rs run model.gguf -p "1+1=" -n 5 --temperature 0
+llama-gguf run model.gguf -p "1+1=" -n 5 --temperature 0
 ```
 
 ### Model Information
 
 ```bash
-llama-cpp-rs info model.gguf
+llama-gguf info model.gguf
 ```
 
 ## Supported Models
@@ -94,7 +94,7 @@ See [MODEL_COMPATIBILITY.md](docs/MODEL_COMPATIBILITY.md) for detailed compatibi
 ## Library Usage
 
 ```rust
-use llama_cpp_rs::{
+use llama_gguf::{
     backend::cpu::CpuBackend,
     gguf::GgufFile,
     model::{load_llama_model, InferenceContext},
@@ -136,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## CLI Reference
 
 ```
-llama-cpp-rs <COMMAND>
+llama-gguf <COMMAND>
 
 Commands:
   run       Run inference on a model
@@ -183,7 +183,7 @@ Enable GPU acceleration with the `--gpu` flag:
 CUDA_PATH=/opt/cuda cargo build --release --features cuda
 
 # Run with GPU acceleration
-llama-cpp-rs run model.gguf -p "Hello" --gpu
+llama-gguf run model.gguf -p "Hello" --gpu
 ```
 
 **Requirements:**

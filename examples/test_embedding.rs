@@ -1,8 +1,8 @@
 // Test embedding lookup and compare
-use llama_cpp_rs::gguf::GgufFile;
-use llama_cpp_rs::tensor::{Tensor, DType};
-use llama_cpp_rs::backend::cpu::CpuBackend;
-use llama_cpp_rs::Backend;
+use llama_gguf::gguf::GgufFile;
+use llama_gguf::tensor::{Tensor, DType};
+use llama_gguf::backend::cpu::CpuBackend;
+use llama_gguf::Backend;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CpuBackend::new();
@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Create tensor from raw data
     let emb_tensor = Tensor::new(emb_data.to_vec(), vec![hidden_size, vocab_size], 
-        llama_cpp_rs::tensor::DType::from(emb_info.dtype))?;
+        llama_gguf::tensor::DType::from(emb_info.dtype))?;
     
     // Dequantize
     let mut emb_f32 = Tensor::zeros(vec![hidden_size, vocab_size], DType::F32);

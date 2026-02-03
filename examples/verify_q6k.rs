@@ -1,6 +1,6 @@
 //! Verify Q6_K dequantization against known values
 
-use llama_cpp_rs::{
+use llama_gguf::{
     backend::{cpu::CpuBackend, Backend},
     model::load_llama_model,
     tensor::{DType, Tensor},

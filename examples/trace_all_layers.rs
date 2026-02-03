@@ -1,6 +1,6 @@
 //! Trace hidden states through all layers
 
-use llama_cpp_rs::{
+use llama_gguf::{
     backend::{cpu::CpuBackend, Backend},
     gguf::GgufFile,
     model::load_llama_model,

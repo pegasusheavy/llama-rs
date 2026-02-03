@@ -1,5 +1,5 @@
 
-use llama_cpp_rs::gguf::GgufFile;
+use llama_gguf::gguf::GgufFile;
 use std::path::Path;
 
 fn main() {

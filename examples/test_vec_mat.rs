@@ -2,8 +2,8 @@
 
 #[cfg(feature = "cuda")]
 fn main() {
-    use llama_cpp_rs::backend::{Backend, cpu::CpuBackend, cuda::CudaBackend};
-    use llama_cpp_rs::tensor::{DType, Tensor};
+    use llama_gguf::backend::{Backend, cpu::CpuBackend, cuda::CudaBackend};
+    use llama_gguf::tensor::{DType, Tensor};
     
     // Create a simple test: 
     // vec: [1, 2, 3, 4]

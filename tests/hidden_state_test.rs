@@ -4,7 +4,7 @@
 //! This test verifies that our forward pass produces numerically similar
 //! results to the llama.cpp reference implementation.
 
-use llama_cpp_rs::{
+use llama_gguf::{
     backend::{cpu::CpuBackend, Backend},
     model::load_llama_model,
     tensor::{DType, Tensor},

@@ -1,6 +1,6 @@
 //! Debug Q6_K data layout
 
-use llama_cpp_rs::{
+use llama_gguf::{
     backend::{cpu::CpuBackend, Backend},
     model::load_llama_model,
     tensor::{DType, Tensor},

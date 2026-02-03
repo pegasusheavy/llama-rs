@@ -1,5 +1,5 @@
 [package]
-name = "llama-cpp-rs"
+name = "llama-gguf"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -10,11 +10,11 @@ keywords = ["llm", "inference", "gguf", "llama", "ai"]
 categories = ["science", "algorithms"]
 
 [lib]
-name = "llama_cpp_rs"
+name = "llama_gguf"
 path = "src/lib.rs"
 
 [[bin]]
-name = "llama-cpp-rs"
+name = "llama-gguf"
 path = "src/main.rs"
 
 [features]

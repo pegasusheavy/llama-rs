@@ -2,11 +2,11 @@
 
 #[cfg(feature = "cuda")]
 fn main() {
-    use llama_cpp_rs::gguf::GgufFile;
-    use llama_cpp_rs::model::{InferenceContext, Model, ModelLoader};
-    use llama_cpp_rs::tokenizer::Tokenizer;
-    use llama_cpp_rs::sampling::{Sampler, SamplerConfig};
-    use llama_cpp_rs::backend::cuda::CudaBackend;
+    use llama_gguf::gguf::GgufFile;
+    use llama_gguf::model::{InferenceContext, Model, ModelLoader};
+    use llama_gguf::tokenizer::Tokenizer;
+    use llama_gguf::sampling::{Sampler, SamplerConfig};
+    use llama_gguf::backend::cuda::CudaBackend;
     use std::sync::Arc;
     use std::io::{self, Write};
     use std::time::Instant;
