@@ -5,8 +5,8 @@
 
 use std::path::Path;
 
-use crate::gguf::GgufFile;
-use crate::tensor::{DType, Tensor, TensorStorage};
+use crate::gguf::{GgufFile, MetadataValue};
+use crate::tensor::{DType, Tensor};
 
 use super::config::{ActivationType, ModelConfig, RopeConfig, RopeScalingType};
 use super::error::{ModelError, ModelResult};
@@ -68,9 +68,27 @@ impl ModelLoader {
         };
 
         // Get core configuration
+        // Try multiple methods to determine vocab size
         let vocab_size = get_u32(&format!("{}.vocab_size", arch))
             .or_else(|_| get_u32("tokenizer.ggml.vocab_size"))
-            .unwrap_or(32000) as usize;
+            .map(|v| v as usize)
+            .unwrap_or_else(|_| {
+                // Fallback: get vocab size from tokenizer tokens array length
+                if let Some(tokens) = gguf.data.metadata.get("tokenizer.ggml.tokens") {
+                    if let MetadataValue::Array(arr) = tokens {
+                        return arr.values.len();
+                    }
+                }
+                // Last resort: infer from embedding tensor shape
+                if let Some(emb_info) = gguf.data.get_tensor("token_embd.weight") {
+                    // Shape is [hidden_size, vocab_size] in llama.cpp convention
+                    if emb_info.dims.len() == 2 {
+                        return emb_info.dims[1] as usize;
+                    }
+                }
+                // Default
+                32000
+            });
 
         let hidden_size = get_u32(&format!("{}.embedding_length", arch))? as usize;
 
@@ -177,18 +195,21 @@ impl ModelLoader {
         let attn_norm_weight = self.load_tensor(&format!("{}.attn_norm.weight", prefix))?;
         let attn_norm = RMSNorm::new(attn_norm_weight, self.config.norm_eps)?;
 
-        // Attention projections
+        // Attention projections (with optional biases)
+        let wq_bias = self.try_load_tensor(&format!("{}.attn_q.bias", prefix));
         let wq = Linear::new(
             self.load_tensor(&format!("{}.attn_q.weight", prefix))?,
-            None,
+            wq_bias,
         )?;
+        let wk_bias = self.try_load_tensor(&format!("{}.attn_k.bias", prefix));
         let wk = Linear::new(
             self.load_tensor(&format!("{}.attn_k.weight", prefix))?,
-            None,
+            wk_bias,
         )?;
+        let wv_bias = self.try_load_tensor(&format!("{}.attn_v.bias", prefix));
         let wv = Linear::new(
             self.load_tensor(&format!("{}.attn_v.weight", prefix))?,
-            None,
+            wv_bias,
         )?;
         let wo = Linear::new(
             self.load_tensor(&format!("{}.attn_output.weight", prefix))?,
@@ -234,6 +255,17 @@ impl ModelLoader {
         })
     }
 
+    /// Try to load a tensor from the GGUF file, returning None if not found
+    fn try_load_tensor(&self, name: &str) -> Option<Tensor> {
+        let tensor_info = self.gguf.data.get_tensor(name)?;
+        let tensor_data = self.gguf.tensor_data(name)?;
+
+        let shape: Vec<usize> = tensor_info.dims.iter().map(|&d| d as usize).collect();
+        let dtype = DType::from(tensor_info.dtype);
+
+        Tensor::new(tensor_data.to_vec(), shape, dtype).ok()
+    }
+
     /// Load a tensor from the GGUF file
     fn load_tensor(&self, name: &str) -> ModelResult<Tensor> {
         let tensor_info = self
@@ -250,12 +282,10 @@ impl ModelLoader {
         let shape: Vec<usize> = tensor_info.dims.iter().map(|&d| d as usize).collect();
         let dtype = DType::from(tensor_info.dtype);
 
-        // Create tensor from the memory-mapped data
-        // SAFETY: The GGUF file is memory-mapped and the data is valid for the lifetime
-        // of the GgufFile. We create a view into this data.
-        let storage = unsafe { TensorStorage::view(tensor_data.as_ptr(), tensor_data.len()) };
-
-        unsafe { Tensor::from_storage(storage, shape, dtype, 0) }
+        // Copy the tensor data to owned storage
+        // This is necessary because the GGUF file is dropped after build_model() returns
+        // and the memory-mapped data would become invalid
+        Tensor::new(tensor_data.to_vec(), shape, dtype)
             .map_err(|e| e.into())
     }
 }

@@ -149,12 +149,20 @@ impl Backend for CpuBackend {
         ops::matvec(a, b, out)
     }
 
+    fn vec_mat(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
+        ops::vec_mat(a, b, out)
+    }
+
     fn dequantize(&self, src: &Tensor, out: &mut Tensor) -> BackendResult<()> {
         ops::dequantize(src, out)
     }
 
     fn matvec_q(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
         ops::matvec_q(a, b, out)
+    }
+
+    fn vec_mat_q(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
+        ops::vec_mat_q(a, b, out)
     }
 
     fn rope(

@@ -232,6 +232,9 @@ impl Tensor {
     }
 
     /// Reshape the tensor to a new shape
+    /// 
+    /// Returns a new tensor with the same data but different shape.
+    /// The new tensor has its own copy of the data to allow mutation.
     pub fn reshape(&self, new_shape: Vec<usize>) -> Result<Self, TensorError> {
         let old_numel: usize = self.shape.iter().product();
         let new_numel: usize = new_shape.iter().product();
@@ -249,12 +252,13 @@ impl Tensor {
 
         let new_strides = compute_strides(&new_shape);
 
+        // Create owned copy to allow mutation
         Ok(Self {
-            storage: self.storage.clone(),
+            storage: self.storage.to_owned(),
             shape: new_shape,
             strides: new_strides,
             dtype: self.dtype,
-            offset: self.offset,
+            offset: 0, // Reset offset since we copied the data
         })
     }
 }

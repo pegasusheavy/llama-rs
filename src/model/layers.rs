@@ -7,10 +7,13 @@ use crate::tensor::{DType, Tensor};
 
 use super::error::{ModelError, ModelResult};
 
-/// Linear (fully connected) layer: y = x @ W^T + b
+/// Linear (fully connected) layer: y = x @ W + b
+///
+/// GGUF convention: weight is stored as [in_features, out_features]
+/// This is transposed from the typical PyTorch convention [out_features, in_features]
 #[derive(Debug)]
 pub struct Linear {
-    /// Weight matrix [out_features, in_features]
+    /// Weight matrix [in_features, out_features] (GGUF convention)
     pub weight: Tensor,
     /// Optional bias [out_features]
     pub bias: Option<Tensor>,
@@ -29,8 +32,9 @@ impl Linear {
             ));
         }
 
-        let out_features = weight.shape()[0];
-        let in_features = weight.shape()[1];
+        // GGUF convention: [in_features, out_features]
+        let in_features = weight.shape()[0];
+        let out_features = weight.shape()[1];
 
         if let Some(ref b) = bias {
             if b.shape() != [out_features] {
@@ -50,18 +54,18 @@ impl Linear {
         })
     }
 
-    /// Forward pass: y = x @ W^T + b
+    /// Forward pass: y = x @ W + b
     pub fn forward(
         &self,
         x: &Tensor,
         out: &mut Tensor,
         backend: &dyn Backend,
     ) -> BackendResult<()> {
-        // For quantized weights, use matvec_q
+        // For quantized weights, use vec_mat_q (x @ W)
         if self.weight.dtype().is_quantized() {
-            backend.matvec_q(&self.weight, x, out)?;
+            backend.vec_mat_q(x, &self.weight, out)?;
         } else {
-            backend.matvec(&self.weight, x, out)?;
+            backend.vec_mat(x, &self.weight, out)?;
         }
 
         // Add bias if present

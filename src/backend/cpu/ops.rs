@@ -5,9 +5,10 @@
 
 use crate::backend::{BackendError, BackendResult};
 use crate::tensor::quant::{
-    dequantize_q2_k, dequantize_q3_k, dequantize_q4_0, dequantize_q4_k, dequantize_q5_k,
-    dequantize_q6_k, dequantize_q8_0, dequantize_q8_k, BlockQ2K, BlockQ3K, BlockQ4K, BlockQ4_0,
-    BlockQ5K, BlockQ6K, BlockQ8K, BlockQ8_0,
+    dequantize_q2_k, dequantize_q3_k, dequantize_q4_0, dequantize_q4_1, dequantize_q4_k,
+    dequantize_q5_0, dequantize_q5_1, dequantize_q5_k, dequantize_q6_k, dequantize_q8_0,
+    dequantize_q8_1, dequantize_q8_k, BlockQ2K, BlockQ3K, BlockQ4K, BlockQ4_0, BlockQ4_1,
+    BlockQ5K, BlockQ5_0, BlockQ5_1, BlockQ6K, BlockQ8K, BlockQ8_0, BlockQ8_1,
 };
 use crate::tensor::{DType, Tensor};
 use rayon::prelude::*;
@@ -509,6 +510,81 @@ pub fn dequantize(src: &Tensor, out: &mut Tensor) -> BackendResult<()> {
 
             Ok(())
         }
+        DType::Q4_1 => {
+            let blocks: &[BlockQ4_1] = bytemuck::cast_slice(src.data());
+            let out_data = out.as_f32_mut()?;
+
+            if out_data.len() != blocks.len() * 32 {
+                return Err(BackendError::ShapeMismatch {
+                    expected: vec![blocks.len() * 32],
+                    got: vec![out_data.len()],
+                });
+            }
+
+            blocks.par_iter().enumerate().for_each(|(i, block)| {
+                let mut tmp = [0.0f32; 32];
+                dequantize_q4_1(block, &mut tmp);
+                let start = i * 32;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        tmp.as_ptr(),
+                        out_data.as_ptr().add(start) as *mut f32,
+                        32,
+                    );
+                }
+            });
+
+            Ok(())
+        }
+        DType::Q5_0 => {
+            let blocks: &[BlockQ5_0] = bytemuck::cast_slice(src.data());
+            let out_data = out.as_f32_mut()?;
+
+            if out_data.len() != blocks.len() * 32 {
+                return Err(BackendError::ShapeMismatch {
+                    expected: vec![blocks.len() * 32],
+                    got: vec![out_data.len()],
+                });
+            }
+
+            // Parallel dequantization
+            out_data
+                .par_chunks_mut(32)
+                .zip(blocks.par_iter())
+                .for_each(|(chunk, block)| {
+                    let mut tmp = [0.0f32; 32];
+                    dequantize_q5_0(block, &mut tmp);
+                    chunk.copy_from_slice(&tmp);
+                });
+
+            Ok(())
+        }
+        DType::Q5_1 => {
+            let blocks: &[BlockQ5_1] = bytemuck::cast_slice(src.data());
+            let out_data = out.as_f32_mut()?;
+
+            if out_data.len() != blocks.len() * 32 {
+                return Err(BackendError::ShapeMismatch {
+                    expected: vec![blocks.len() * 32],
+                    got: vec![out_data.len()],
+                });
+            }
+
+            blocks.par_iter().enumerate().for_each(|(i, block)| {
+                let mut tmp = [0.0f32; 32];
+                dequantize_q5_1(block, &mut tmp);
+                let start = i * 32;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        tmp.as_ptr(),
+                        out_data.as_ptr().add(start) as *mut f32,
+                        32,
+                    );
+                }
+            });
+
+            Ok(())
+        }
         DType::Q8_0 => {
             let blocks: &[BlockQ8_0] = bytemuck::cast_slice(src.data());
             let out_data = out.as_f32_mut()?;
@@ -523,6 +599,32 @@ pub fn dequantize(src: &Tensor, out: &mut Tensor) -> BackendResult<()> {
             blocks.par_iter().enumerate().for_each(|(i, block)| {
                 let mut tmp = [0.0f32; 32];
                 dequantize_q8_0(block, &mut tmp);
+                let start = i * 32;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        tmp.as_ptr(),
+                        out_data.as_ptr().add(start) as *mut f32,
+                        32,
+                    );
+                }
+            });
+
+            Ok(())
+        }
+        DType::Q8_1 => {
+            let blocks: &[BlockQ8_1] = bytemuck::cast_slice(src.data());
+            let out_data = out.as_f32_mut()?;
+
+            if out_data.len() != blocks.len() * 32 {
+                return Err(BackendError::ShapeMismatch {
+                    expected: vec![blocks.len() * 32],
+                    got: vec![out_data.len()],
+                });
+            }
+
+            blocks.par_iter().enumerate().for_each(|(i, block)| {
+                let mut tmp = [0.0f32; 32];
+                dequantize_q8_1(block, &mut tmp);
                 let start = i * 32;
                 unsafe {
                     std::ptr::copy_nonoverlapping(
@@ -715,6 +817,67 @@ pub fn matvec_q(a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
 
     dequantize(a, &mut a_f32)?;
     matvec(&a_f32, b, out)
+}
+
+/// Vector-matrix multiplication: out = a @ b where a is 1D, b is 2D
+/// 
+/// Computes y = x @ W where x is [k] and W is [k, n], giving y [n]
+/// This is the GGUF convention where weights are stored as [in_features, out_features]
+pub fn vec_mat(a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
+    check_dtype(a, DType::F32)?;
+    check_dtype(b, DType::F32)?;
+    check_dtype(out, DType::F32)?;
+
+    if a.ndim() != 1 || b.ndim() != 2 {
+        return Err(BackendError::InvalidArgument(
+            "vec_mat requires 1D vector and 2D matrix".into(),
+        ));
+    }
+
+    let k = a.shape()[0];
+    let (k2, n) = (b.shape()[0], b.shape()[1]);
+    
+    if k != k2 {
+        return Err(BackendError::ShapeMismatch {
+            expected: vec![k],
+            got: vec![k2],
+        });
+    }
+
+    if out.shape() != [n] {
+        return Err(BackendError::ShapeMismatch {
+            expected: vec![n],
+            got: out.shape().to_vec(),
+        });
+    }
+
+    let a_data = a.as_f32()?;
+    let b_data = b.as_f32()?;
+    let out_data = out.as_f32_mut()?;
+
+    // Compute y[j] = sum_i x[i] * W[i,j] for each j
+    // Parallel over columns
+    out_data.par_iter_mut().enumerate().for_each(|(j, o)| {
+        let mut sum = 0.0f32;
+        for i in 0..k {
+            sum += a_data[i] * b_data[i * n + j];
+        }
+        *o = sum;
+    });
+
+    Ok(())
+}
+
+/// Quantized vector-matrix multiply
+/// 
+/// For now, this dequantizes and uses regular vec_mat.
+/// TODO: Implement fused quantized vecmat for better performance.
+pub fn vec_mat_q(a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
+    // Dequantize the matrix first, then use regular vec_mat
+    let mut b_f32 = Tensor::zeros(b.shape().to_vec(), DType::F32);
+
+    dequantize(b, &mut b_f32)?;
+    vec_mat(a, &b_f32, out)
 }
 
 // =============================================================================

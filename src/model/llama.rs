@@ -60,10 +60,20 @@ impl LlamaModel {
     }
 
     /// Get token embedding for given token IDs
-    fn embed_tokens(&self, tokens: &[u32], _backend: &dyn Backend) -> ModelResult<Tensor> {
-        let embedding_data = self.token_embedding.as_f32()?;
+    fn embed_tokens(&self, tokens: &[u32], backend: &dyn Backend) -> ModelResult<Tensor> {
         let hidden_size = self.config.hidden_size;
         let seq_len = tokens.len();
+
+        // Handle both quantized and non-quantized embeddings
+        let embedding_data: Vec<f32> = if self.token_embedding.dtype() == DType::F32 {
+            self.token_embedding.as_f32()?.to_vec()
+        } else {
+            // Dequantize the embedding tensor
+            let numel = self.token_embedding.numel();
+            let mut dequant = Tensor::zeros(vec![numel], DType::F32);
+            backend.dequantize(&self.token_embedding, &mut dequant)?;
+            dequant.as_f32()?.to_vec()
+        };
 
         let mut output = vec![0.0f32; seq_len * hidden_size];
 
@@ -77,9 +87,19 @@ impl LlamaModel {
             }
 
             let src_start = token_idx * hidden_size;
+            let src_end = src_start + hidden_size;
+            
+            if src_end > embedding_data.len() {
+                return Err(ModelError::InvalidMetadata {
+                    key: "embedding".into(),
+                    message: format!("Embedding index out of bounds: token_idx={}, src_end={}, embedding_len={}", 
+                        token_idx, src_end, embedding_data.len()),
+                });
+            }
+            
             let dst_start = i * hidden_size;
             output[dst_start..dst_start + hidden_size]
-                .copy_from_slice(&embedding_data[src_start..src_start + hidden_size]);
+                .copy_from_slice(&embedding_data[src_start..src_end]);
         }
 
         if seq_len == 1 {

@@ -82,8 +82,12 @@ pub trait Backend: Send + Sync {
     /// Matrix multiplication: out = a @ b
     fn matmul(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()>;
 
-    /// Matrix-vector multiplication: out = a @ b where b is 1D
+    /// Matrix-vector multiplication: out = a @ b where a is 2D, b is 1D
     fn matvec(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()>;
+
+    /// Vector-matrix multiplication: out = a @ b where a is 1D, b is 2D
+    /// This computes y = x @ W where x is [k] and W is [k, n], giving y [n]
+    fn vec_mat(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()>;
 
     // =========================================================================
     // Quantization
@@ -94,6 +98,9 @@ pub trait Backend: Send + Sync {
 
     /// Quantized matrix-vector multiply (fused dequant + matvec for performance)
     fn matvec_q(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()>;
+
+    /// Quantized vector-matrix multiply (fused dequant + vec_mat for performance)
+    fn vec_mat_q(&self, a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()>;
 
     // =========================================================================
     // Position embeddings
