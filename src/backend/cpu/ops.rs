@@ -16,6 +16,9 @@ use rayon::prelude::*;
 // Element-wise Operations
 // =============================================================================
 
+// Threshold for using parallel execution (avoid rayon overhead for small arrays)
+const PARALLEL_THRESHOLD: usize = 8192;
+
 /// Element-wise addition: out = a + b
 pub fn add(a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
     check_same_shape(a, b)?;
@@ -26,12 +29,57 @@ pub fn add(a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
     let b_data = b.as_f32()?;
     let out_data = out.as_f32_mut()?;
 
-    out_data
-        .par_iter_mut()
-        .zip(a_data.par_iter().zip(b_data.par_iter()))
-        .for_each(|(o, (&a, &b))| *o = a + b);
+    if out_data.len() >= PARALLEL_THRESHOLD {
+        out_data
+            .par_iter_mut()
+            .zip(a_data.par_iter().zip(b_data.par_iter()))
+            .for_each(|(o, (&a, &b))| *o = a + b);
+    } else {
+        // Sequential with SIMD
+        add_f32_simd(a_data, b_data, out_data);
+    }
 
     Ok(())
+}
+
+/// SIMD-optimized element-wise add
+fn add_f32_simd(a: &[f32], b: &[f32], out: &mut [f32]) {
+    #[cfg(target_arch = "x86_64")]
+    if super::simd::has_avx2() {
+        unsafe { add_f32_avx2(a, b, out) };
+        return;
+    }
+    
+    // Scalar fallback
+    for ((o, &a_val), &b_val) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
+        *o = a_val + b_val;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn add_f32_avx2(a: &[f32], b: &[f32], out: &mut [f32]) {
+    use std::arch::x86_64::*;
+    
+    let n = a.len();
+    let chunks = n / 8;
+    
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+    let out_ptr = out.as_mut_ptr();
+    
+    for i in 0..chunks {
+        let offset = i * 8;
+        let va = _mm256_loadu_ps(a_ptr.add(offset));
+        let vb = _mm256_loadu_ps(b_ptr.add(offset));
+        let vr = _mm256_add_ps(va, vb);
+        _mm256_storeu_ps(out_ptr.add(offset), vr);
+    }
+    
+    // Handle remainder
+    for i in (chunks * 8)..n {
+        *out.get_unchecked_mut(i) = *a.get_unchecked(i) + *b.get_unchecked(i);
+    }
 }
 
 /// Element-wise multiplication: out = a * b
@@ -44,12 +92,54 @@ pub fn mul(a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
     let b_data = b.as_f32()?;
     let out_data = out.as_f32_mut()?;
 
-    out_data
-        .par_iter_mut()
-        .zip(a_data.par_iter().zip(b_data.par_iter()))
-        .for_each(|(o, (&a, &b))| *o = a * b);
+    if out_data.len() >= PARALLEL_THRESHOLD {
+        out_data
+            .par_iter_mut()
+            .zip(a_data.par_iter().zip(b_data.par_iter()))
+            .for_each(|(o, (&a, &b))| *o = a * b);
+    } else {
+        mul_f32_simd(a_data, b_data, out_data);
+    }
 
     Ok(())
+}
+
+/// SIMD-optimized element-wise mul
+fn mul_f32_simd(a: &[f32], b: &[f32], out: &mut [f32]) {
+    #[cfg(target_arch = "x86_64")]
+    if super::simd::has_avx2() {
+        unsafe { mul_f32_avx2(a, b, out) };
+        return;
+    }
+    
+    for ((o, &a_val), &b_val) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
+        *o = a_val * b_val;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn mul_f32_avx2(a: &[f32], b: &[f32], out: &mut [f32]) {
+    use std::arch::x86_64::*;
+    
+    let n = a.len();
+    let chunks = n / 8;
+    
+    let a_ptr = a.as_ptr();
+    let b_ptr = b.as_ptr();
+    let out_ptr = out.as_mut_ptr();
+    
+    for i in 0..chunks {
+        let offset = i * 8;
+        let va = _mm256_loadu_ps(a_ptr.add(offset));
+        let vb = _mm256_loadu_ps(b_ptr.add(offset));
+        let vr = _mm256_mul_ps(va, vb);
+        _mm256_storeu_ps(out_ptr.add(offset), vr);
+    }
+    
+    for i in (chunks * 8)..n {
+        *out.get_unchecked_mut(i) = *a.get_unchecked(i) * *b.get_unchecked(i);
+    }
 }
 
 /// Scale by scalar: out = a * scalar
@@ -60,12 +150,53 @@ pub fn scale(a: &Tensor, scalar: f32, out: &mut Tensor) -> BackendResult<()> {
     let a_data = a.as_f32()?;
     let out_data = out.as_f32_mut()?;
 
-    out_data
-        .par_iter_mut()
-        .zip(a_data.par_iter())
-        .for_each(|(o, &a)| *o = a * scalar);
+    if out_data.len() >= PARALLEL_THRESHOLD {
+        out_data
+            .par_iter_mut()
+            .zip(a_data.par_iter())
+            .for_each(|(o, &a)| *o = a * scalar);
+    } else {
+        scale_f32_simd(a_data, scalar, out_data);
+    }
 
     Ok(())
+}
+
+/// SIMD-optimized scale
+fn scale_f32_simd(a: &[f32], scalar: f32, out: &mut [f32]) {
+    #[cfg(target_arch = "x86_64")]
+    if super::simd::has_avx2() {
+        unsafe { scale_f32_avx2(a, scalar, out) };
+        return;
+    }
+    
+    for (o, &a_val) in out.iter_mut().zip(a.iter()) {
+        *o = a_val * scalar;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn scale_f32_avx2(a: &[f32], scalar: f32, out: &mut [f32]) {
+    use std::arch::x86_64::*;
+    
+    let n = a.len();
+    let chunks = n / 8;
+    let vscalar = _mm256_set1_ps(scalar);
+    
+    let a_ptr = a.as_ptr();
+    let out_ptr = out.as_mut_ptr();
+    
+    for i in 0..chunks {
+        let offset = i * 8;
+        let va = _mm256_loadu_ps(a_ptr.add(offset));
+        let vr = _mm256_mul_ps(va, vscalar);
+        _mm256_storeu_ps(out_ptr.add(offset), vr);
+    }
+    
+    for i in (chunks * 8)..n {
+        *out.get_unchecked_mut(i) = *a.get_unchecked(i) * scalar;
+    }
 }
 
 // =============================================================================
@@ -80,13 +211,19 @@ pub fn silu(x: &Tensor, out: &mut Tensor) -> BackendResult<()> {
     let x_data = x.as_f32()?;
     let out_data = out.as_f32_mut()?;
 
-    out_data
-        .par_iter_mut()
-        .zip(x_data.par_iter())
-        .for_each(|(o, &x)| {
-            let sigmoid = 1.0 / (1.0 + (-x).exp());
-            *o = x * sigmoid;
-        });
+    if out_data.len() >= PARALLEL_THRESHOLD {
+        out_data
+            .par_iter_mut()
+            .zip(x_data.par_iter())
+            .for_each(|(o, &x)| {
+                *o = x / (1.0 + (-x).exp());
+            });
+    } else {
+        // Sequential - avoid rayon overhead
+        for (o, &x) in out_data.iter_mut().zip(x_data.iter()) {
+            *o = x / (1.0 + (-x).exp());
+        }
+    }
 
     Ok(())
 }
@@ -225,22 +362,74 @@ pub fn matmul(a: &Tensor, b: &Tensor, out: &mut Tensor) -> BackendResult<()> {
     let b_data = b.as_f32()?;
     let out_data = out.as_f32_mut()?;
 
-    // Simple implementation - parallel over rows
-    // TODO: Use BLAS or optimized kernels for better performance
-    out_data
-        .par_chunks_mut(n)
+    // Use different strategies based on matrix size
+    let total_ops = m * k1 * n;
+    
+    if total_ops < 256 * 256 * 256 {
+        // Simple parallel implementation for small matrices
+        matmul_simple(a_data, b_data, out_data, m, k1, n);
+    } else {
+        // Tiled matmul for large matrices
+        matmul_tiled(a_data, b_data, out_data, m, k1, n);
+    }
+
+    Ok(())
+}
+
+/// Simple parallel matmul for small matrices
+fn matmul_simple(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) {
+    c.par_chunks_mut(n)
         .enumerate()
         .for_each(|(i, row_out)| {
             for j in 0..n {
                 let mut sum = 0.0f32;
-                for k in 0..k1 {
-                    sum += a_data[i * k1 + k] * b_data[k * n + j];
+                let a_row = i * k;
+                for kk in 0..k {
+                    sum += unsafe {
+                        *a.get_unchecked(a_row + kk) * *b.get_unchecked(kk * n + j)
+                    };
                 }
                 row_out[j] = sum;
             }
         });
+}
 
-    Ok(())
+/// Tiled matrix multiplication for better cache utilization (large matrices)
+fn matmul_tiled(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) {
+    // Tile sizes tuned for L2 cache (~256KB)
+    const TILE_M: usize = 32;
+    const TILE_N: usize = 256;
+    const TILE_K: usize = 32;
+    
+    // Initialize output to zero
+    c.iter_mut().for_each(|x| *x = 0.0);
+    
+    // Process rows in parallel
+    c.par_chunks_mut(n)
+        .enumerate()
+        .for_each(|(i, c_row)| {
+            for kk in (0..k).step_by(TILE_K) {
+                let k_end = (kk + TILE_K).min(k);
+                
+                for jj in (0..n).step_by(TILE_N) {
+                    let j_end = (jj + TILE_N).min(n);
+                    
+                    let a_row = i * k;
+                    
+                    for j in jj..j_end {
+                        let mut sum = c_row[j];
+                        
+                        for kk_inner in kk..k_end {
+                            sum += unsafe {
+                                *a.get_unchecked(a_row + kk_inner) * *b.get_unchecked(kk_inner * n + j)
+                            };
+                        }
+                        
+                        c_row[j] = sum;
+                    }
+                }
+            }
+        });
 }
 
 /// Matrix-vector multiplication: out = a @ b where b is 1D (SIMD-optimized)
