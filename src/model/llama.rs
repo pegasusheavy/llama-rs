@@ -79,6 +79,11 @@ impl LlamaModel {
         &self.output
     }
     
+    /// Get token embedding tensor
+    pub fn token_embedding(&self) -> &Tensor {
+        &self.token_embedding
+    }
+    
     /// Get token embedding for given token IDs (public for testing)
     pub fn embed_tokens(&self, tokens: &[u32], backend: &dyn Backend) -> ModelResult<Tensor> {
         let hidden_size = self.config.hidden_size;

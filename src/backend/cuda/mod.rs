@@ -17,6 +17,12 @@
 mod kernels;
 #[cfg(feature = "cuda")]
 mod memory;
+#[cfg(feature = "cuda")]
+pub mod gpu_model;
+#[cfg(feature = "cuda")]
+pub mod gpu_ops;
+#[cfg(feature = "cuda")]
+pub mod gpu_inference;
 
 use crate::backend::{Backend, BackendError, BackendResult};
 use crate::tensor::{DType, Tensor};

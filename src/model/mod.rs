@@ -30,6 +30,7 @@ pub use embeddings::{
     cosine_similarity, dot_product, euclidean_distance, find_nearest,
 };
 pub use error::{ModelError, ModelResult};
+pub use layers::TransformerLayer;
 pub use llama::LlamaModel;
 pub use loader::{load_llama_model, ModelLoader};
 pub use lora::{LoraAdapter, LoraAdapters, LoraConfig};
