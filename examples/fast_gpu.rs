@@ -4,11 +4,11 @@
 
 #[cfg(feature = "cuda")]
 fn main() {
-    use llama_rs::gguf::GgufFile;
-    use llama_rs::model::ModelLoader;
-    use llama_rs::tokenizer::Tokenizer;
-    use llama_rs::sampling::{Sampler, SamplerConfig};
-    use llama_rs::backend::cuda::fast_inference::FastGpuInference;
+    use llama_cpp_rs::gguf::GgufFile;
+    use llama_cpp_rs::model::ModelLoader;
+    use llama_cpp_rs::tokenizer::Tokenizer;
+    use llama_cpp_rs::sampling::{Sampler, SamplerConfig};
+    use llama_cpp_rs::backend::cuda::fast_inference::FastGpuInference;
     use std::io::{self, Write};
     use std::time::Instant;
 
@@ -69,7 +69,7 @@ fn main() {
         let logits = gpu.forward(current_token).expect("Forward failed");
         
         // Sample
-        let logits_tensor = llama_rs::tensor::Tensor::from_f32(&logits, vec![logits.len()]).unwrap();
+        let logits_tensor = llama_cpp_rs::tensor::Tensor::from_f32(&logits, vec![logits.len()]).unwrap();
         let next_token = sampler.sample(&logits_tensor, &[]);
         
         // Decode and print

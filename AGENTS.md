@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Guidelines for AI coding assistants working on llama-rs.
+Guidelines for AI coding assistants working on llama-cpp-rs.
 
 ## Project Overview
 
-llama-rs is a Rust implementation of llama.cpp - a high-performance LLM inference engine. The goal is full feature parity with llama.cpp while providing idiomatic Rust APIs suitable for ecosystem contribution.
+llama-cpp-rs is a Rust implementation of llama.cpp - a high-performance LLM inference engine. The goal is full feature parity with llama.cpp while providing idiomatic Rust APIs suitable for ecosystem contribution.
 
 ## Architecture
 

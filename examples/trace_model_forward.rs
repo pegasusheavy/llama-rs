@@ -1,8 +1,8 @@
 //! Trace the actual model forward pass with detailed debugging.
 
-use llama_rs::backend::cpu::CpuBackend;
-use llama_rs::backend::Backend;
-use llama_rs::model::{InferenceContext, Model, ModelLoader};
+use llama_cpp_rs::backend::cpu::CpuBackend;
+use llama_cpp_rs::backend::Backend;
+use llama_cpp_rs::model::{InferenceContext, Model, ModelLoader};
 use std::sync::Arc;
 
 fn main() {

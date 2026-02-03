@@ -1,14 +1,14 @@
 //! Check top predictions from our model for various inputs.
 
-use llama_rs::backend::cpu::CpuBackend;
-use llama_rs::backend::Backend;
-use llama_rs::model::{InferenceContext, Model, ModelLoader};
-use llama_rs::tokenizer::Tokenizer;
-use llama_rs::gguf::GgufFile;
+use llama_cpp_rs::backend::cpu::CpuBackend;
+use llama_cpp_rs::backend::Backend;
+use llama_cpp_rs::model::{InferenceContext, Model, ModelLoader};
+use llama_cpp_rs::tokenizer::Tokenizer;
+use llama_cpp_rs::gguf::GgufFile;
 use std::sync::Arc;
 use std::path::Path;
 
-fn get_top_predictions(model: &dyn Model, tokenizer: &Tokenizer, backend: Arc<dyn Backend>, config: &llama_rs::model::ModelConfig, tokens: &[u32], desc: &str, n: usize) {
+fn get_top_predictions(model: &dyn Model, tokenizer: &Tokenizer, backend: Arc<dyn Backend>, config: &llama_cpp_rs::model::ModelConfig, tokens: &[u32], desc: &str, n: usize) {
     let mut ctx = InferenceContext::new(config, backend);
     let logits = model.forward(tokens, &mut ctx).expect("Forward failed");
     

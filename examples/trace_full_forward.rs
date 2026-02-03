@@ -2,7 +2,7 @@
 //! 
 //! This runs token "=" through all layers and shows intermediate stats
 
-use llama_rs::{
+use llama_cpp_rs::{
     backend::{cpu::CpuBackend, Backend},
     model::load_llama_model,
     tensor::{DType, Tensor},

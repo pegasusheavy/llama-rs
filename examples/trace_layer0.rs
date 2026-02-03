@@ -3,7 +3,7 @@
 //! This example prints intermediate values at each step of layer 0
 //! to help debug divergence from llama.cpp
 
-use llama_rs::{
+use llama_cpp_rs::{
     backend::{cpu::CpuBackend, Backend},
     model::load_llama_model,
     tensor::{DType, Tensor},

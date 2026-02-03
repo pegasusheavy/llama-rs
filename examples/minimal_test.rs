@@ -1,10 +1,10 @@
 //! Minimal test: just embedding -> output projection (no layers)
 //! This tests if our weight loading and matrix multiply are correct.
 
-use llama_rs::backend::cpu::CpuBackend;
-use llama_rs::backend::Backend;
-use llama_rs::gguf::GgufFile;
-use llama_rs::tensor::{DType, Tensor};
+use llama_cpp_rs::backend::cpu::CpuBackend;
+use llama_cpp_rs::backend::Backend;
+use llama_cpp_rs::gguf::GgufFile;
+use llama_cpp_rs::tensor::{DType, Tensor};
 use std::path::Path;
 
 fn load_tensor(gguf: &GgufFile, name: &str) -> Tensor {

@@ -1,10 +1,10 @@
 //! Compare actual model hidden states with manual computation.
 
-use llama_rs::backend::cpu::CpuBackend;
-use llama_rs::backend::Backend;
-use llama_rs::gguf::GgufFile;
-use llama_rs::model::{InferenceContext, Model, ModelLoader};
-use llama_rs::tensor::{DType, Tensor};
+use llama_cpp_rs::backend::cpu::CpuBackend;
+use llama_cpp_rs::backend::Backend;
+use llama_cpp_rs::gguf::GgufFile;
+use llama_cpp_rs::model::{InferenceContext, Model, ModelLoader};
+use llama_cpp_rs::tensor::{DType, Tensor};
 use std::path::Path;
 use std::sync::Arc;
 

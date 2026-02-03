@@ -2,8 +2,8 @@
 //!
 //! These tests verify that the various components work together correctly.
 
-use llama_rs::backend::default_backend;
-use llama_rs::tensor::{DType, Tensor};
+use llama_cpp_rs::backend::default_backend;
+use llama_cpp_rs::tensor::{DType, Tensor};
 
 // =============================================================================
 // Backend Basic Tests
@@ -304,7 +304,7 @@ fn test_tensor_quantized_zeros() {
 
 #[test]
 fn test_dequantize_q4_0() {
-    use llama_rs::tensor::quant::{dequantize_q4_0, quantize_q4_0};
+    use llama_cpp_rs::tensor::quant::{dequantize_q4_0, quantize_q4_0};
 
     let original: [f32; 32] = std::array::from_fn(|i| (i as f32 - 16.0) * 0.1);
     let block = quantize_q4_0(&original);
@@ -323,7 +323,7 @@ fn test_dequantize_q4_0() {
 
 #[test]
 fn test_dequantize_q8_0() {
-    use llama_rs::tensor::quant::{dequantize_q8_0, quantize_q8_0};
+    use llama_cpp_rs::tensor::quant::{dequantize_q8_0, quantize_q8_0};
 
     let original: [f32; 32] = std::array::from_fn(|i| (i as f32 - 16.0) * 0.1);
     let block = quantize_q8_0(&original);

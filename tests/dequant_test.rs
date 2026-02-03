@@ -1,6 +1,6 @@
 //! Tests for quantization/dequantization functions
 
-use llama_rs::tensor::quant::{
+use llama_cpp_rs::tensor::quant::{
     dequantize_q4_0, dequantize_q4_1, dequantize_q5_0, dequantize_q5_1, dequantize_q8_0,
     quantize_q4_0, quantize_q4_1, quantize_q8_0,
 };
@@ -161,7 +161,7 @@ fn test_q4_1_with_offset() {
 
 #[test]
 fn test_dequantize_q5_0() {
-    use llama_rs::tensor::quant::BlockQ5_0;
+    use llama_cpp_rs::tensor::quant::BlockQ5_0;
     use half::f16;
 
     // Create a simple Q5_0 block for testing
@@ -189,7 +189,7 @@ fn test_dequantize_q5_0() {
 
 #[test]
 fn test_dequantize_q5_1() {
-    use llama_rs::tensor::quant::BlockQ5_1;
+    use llama_cpp_rs::tensor::quant::BlockQ5_1;
     use half::f16;
 
     // Create a simple Q5_1 block for testing

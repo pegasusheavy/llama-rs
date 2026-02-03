@@ -1,9 +1,9 @@
 //! Check weight dimensions and first values
 
-use llama_rs::backend::cpu::CpuBackend;
-use llama_rs::backend::Backend;
-use llama_rs::gguf::GgufFile;
-use llama_rs::tensor::{DType, Tensor};
+use llama_cpp_rs::backend::cpu::CpuBackend;
+use llama_cpp_rs::backend::Backend;
+use llama_cpp_rs::gguf::GgufFile;
+use llama_cpp_rs::tensor::{DType, Tensor};
 use std::path::Path;
 
 fn main() {

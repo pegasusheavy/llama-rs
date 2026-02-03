@@ -1,6 +1,6 @@
 //! Debug tensor names for GPU weight matching
 
-use llama_rs::gguf::GgufFile;
+use llama_cpp_rs::gguf::GgufFile;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

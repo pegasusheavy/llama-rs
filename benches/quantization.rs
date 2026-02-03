@@ -3,9 +3,9 @@
 //! Run with: cargo bench
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use llama_rs::tensor::{DType, Tensor};
-use llama_rs::backend::cpu::CpuBackend;
-use llama_rs::Backend;
+use llama_cpp_rs::tensor::{DType, Tensor};
+use llama_cpp_rs::backend::cpu::CpuBackend;
+use llama_cpp_rs::Backend;
 
 /// Benchmark tensor creation and basic operations
 fn tensor_creation(c: &mut Criterion) {
@@ -158,7 +158,7 @@ fn silu_benchmark(c: &mut Criterion) {
 
 /// Benchmark dequantization
 fn dequant_benchmark(c: &mut Criterion) {
-    use llama_rs::tensor::quant::{dequantize_q4_0, dequantize_q8_0, BlockQ4_0, BlockQ8_0};
+    use llama_cpp_rs::tensor::quant::{dequantize_q4_0, dequantize_q8_0, BlockQ4_0, BlockQ8_0};
     
     let mut group = c.benchmark_group("dequantize");
     

@@ -1,6 +1,6 @@
 
-use llama_rs::model::load_llama_model;
-use llama_rs::Model;
+use llama_cpp_rs::model::load_llama_model;
+use llama_cpp_rs::Model;
 use std::path::Path;
 
 fn main() {

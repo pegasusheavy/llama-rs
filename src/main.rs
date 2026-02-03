@@ -2,12 +2,12 @@ use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use llama_rs::gguf::{GgufFile, MetadataValue};
-use llama_rs::huggingface::{format_bytes, HfClient};
-use llama_rs::model::{InferenceContext, ModelLoader};
-use llama_rs::sampling::{Sampler, SamplerConfig};
-use llama_rs::tokenizer::Tokenizer;
-use llama_rs::Model;
+use llama_cpp_rs::gguf::{GgufFile, MetadataValue};
+use llama_cpp_rs::huggingface::{format_bytes, HfClient};
+use llama_cpp_rs::model::{InferenceContext, ModelLoader};
+use llama_cpp_rs::sampling::{Sampler, SamplerConfig};
+use llama_cpp_rs::tokenizer::Tokenizer;
+use llama_cpp_rs::Model;
 
 #[derive(Parser)]
 #[command(name = "llama-rs")]
@@ -357,7 +357,7 @@ fn main() {
 fn run_server(model_path: &str, host: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        llama_rs::server::run_server(llama_rs::server::ServerConfig {
+        llama_cpp_rs::server::run_server(llama_cpp_rs::server::ServerConfig {
             host: host.to_string(),
             port,
             model_path: model_path.to_string(),
@@ -399,10 +399,10 @@ fn run_inference(
     let model = loader.build_model()?;
 
     // Create backend and context
-    let backend: Arc<dyn llama_rs::Backend> = if use_gpu {
+    let backend: Arc<dyn llama_cpp_rs::Backend> = if use_gpu {
         #[cfg(feature = "cuda")]
         {
-            match llama_rs::backend::cuda::CudaBackend::new() {
+            match llama_cpp_rs::backend::cuda::CudaBackend::new() {
                 Ok(mut cuda) => {
                     eprintln!("Using CUDA backend: {}", cuda.device_name());
                     // Upload dequantized weights to GPU for full acceleration
@@ -420,17 +420,17 @@ fn run_inference(
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to initialize CUDA ({}), falling back to CPU", e);
-                    Arc::new(llama_rs::backend::cpu::CpuBackend::new())
+                    Arc::new(llama_cpp_rs::backend::cpu::CpuBackend::new())
                 }
             }
         }
         #[cfg(not(feature = "cuda"))]
         {
             eprintln!("Warning: CUDA not compiled in, falling back to CPU");
-            Arc::new(llama_rs::backend::cpu::CpuBackend::new())
+            Arc::new(llama_cpp_rs::backend::cpu::CpuBackend::new())
         }
     } else {
-        Arc::new(llama_rs::backend::cpu::CpuBackend::new())
+        Arc::new(llama_cpp_rs::backend::cpu::CpuBackend::new())
     };
     let mut ctx = InferenceContext::new(&config, backend);
 
@@ -533,7 +533,7 @@ fn run_chat(
     let model = loader.build_model()?;
 
     // Create backend and context
-    let backend: Arc<dyn llama_rs::Backend> = Arc::new(llama_rs::backend::cpu::CpuBackend::new());
+    let backend: Arc<dyn llama_cpp_rs::Backend> = Arc::new(llama_cpp_rs::backend::cpu::CpuBackend::new());
     let mut ctx = InferenceContext::new(&config, backend);
 
     // Configure sampler
@@ -855,7 +855,7 @@ fn format_metadata_value(value: &MetadataValue) -> String {
 
 /// Show system information and capabilities
 fn show_sysinfo() {
-    use llama_rs::backend::cpu::CpuBackend;
+    use llama_cpp_rs::backend::cpu::CpuBackend;
 
     let backend = CpuBackend::new();
 
@@ -897,7 +897,7 @@ fn run_quantize(
     qtype: &str,
     threads: Option<usize>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use llama_rs::tensor::DType;
+    use llama_cpp_rs::tensor::DType;
 
     // Parse target quantization type
     let target_dtype = match qtype.to_lowercase().as_str() {
@@ -1036,7 +1036,7 @@ fn run_benchmark(
     eprintln!();
 
     // Create inference context
-    let backend: Arc<dyn llama_rs::Backend> = Arc::new(llama_rs::backend::cpu::CpuBackend::new());
+    let backend: Arc<dyn llama_cpp_rs::Backend> = Arc::new(llama_cpp_rs::backend::cpu::CpuBackend::new());
     let mut ctx = InferenceContext::new(&config, backend.clone());
 
     // Generate dummy prompt tokens
@@ -1120,7 +1120,7 @@ fn run_embed(
     text: &str,
     format: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use llama_rs::model::{EmbeddingConfig, EmbeddingExtractor};
+    use llama_cpp_rs::model::{EmbeddingConfig, EmbeddingExtractor};
 
     eprintln!("Loading model: {}", model_path);
     let gguf = GgufFile::open(model_path)?;
@@ -1129,7 +1129,7 @@ fn run_embed(
     let config = loader.config().clone();
     let model = loader.build_model()?;
 
-    let backend: Arc<dyn llama_rs::Backend> = Arc::new(llama_rs::backend::cpu::CpuBackend::new());
+    let backend: Arc<dyn llama_cpp_rs::Backend> = Arc::new(llama_cpp_rs::backend::cpu::CpuBackend::new());
     let mut ctx = InferenceContext::new(&config, backend.clone());
 
     let embed_config = EmbeddingConfig::default();
