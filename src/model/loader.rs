@@ -169,8 +169,9 @@ impl ModelLoader {
         let norm = RMSNorm::new(norm_weight, self.config.norm_eps)?;
 
         // Load output projection (may be tied to embeddings)
-        let output = if self.config.tie_word_embeddings {
-            // Use transposed embedding as output
+        // Check if output.weight exists - if not, use weight tying
+        let output = if self.config.tie_word_embeddings || self.try_load_tensor("output.weight").is_none() {
+            // Use embedding weights as output (weight tying)
             Linear::new(token_embedding.clone(), None)?
         } else {
             let output_weight = self.load_tensor("output.weight")?;
