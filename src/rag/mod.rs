@@ -51,6 +51,8 @@ pub use store::*;
 pub use config::*;
 #[cfg(feature = "rag")]
 pub use embedding::*;
+#[cfg(feature = "rag")]
+pub use config::example_config;
 
 use thiserror::Error;
 

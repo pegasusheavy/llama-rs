@@ -41,10 +41,13 @@ pub struct RagStore {
 impl RagStore {
     /// Connect to the vector store
     pub async fn connect(config: RagConfig) -> RagResult<Self> {
+        // Validate config first
+        config.validate()?;
+        
         let mut pg_config = Config::new();
         
         // Parse connection string
-        let url = url::Url::parse(&config.connection_string)
+        let url = url::Url::parse(config.connection_string())
             .map_err(|e| RagError::ConfigError(format!("Invalid connection string: {}", e)))?;
         
         pg_config.host = url.host_str().map(String::from);
@@ -71,6 +74,12 @@ impl RagStore {
         Ok(Self { pool, config })
     }
     
+    /// Connect using configuration loaded from file and/or environment
+    pub async fn connect_with_config(config_path: Option<&str>) -> RagResult<Self> {
+        let config = RagConfig::load(config_path)?;
+        Self::connect(config).await
+    }
+    
     /// Create the embeddings table if it doesn't exist
     pub async fn create_table(&self) -> RagResult<()> {
         let client = self.pool.get().await
@@ -86,8 +95,8 @@ impl RagStore {
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
             "#,
-            self.config.table_name,
-            self.config.embedding_dim
+            self.config.table_name(),
+            self.config.embedding_dim()
         );
         
         client.execute(&create_table, &[]).await
@@ -99,9 +108,9 @@ impl RagStore {
             CREATE INDEX IF NOT EXISTS {}_embedding_idx 
             ON {} USING ivfflat (embedding {})
             "#,
-            self.config.table_name,
-            self.config.table_name,
-            self.config.distance_metric.index_ops()
+            self.config.table_name(),
+            self.config.table_name(),
+            self.config.distance_metric().index_ops()
         );
         
         // Index creation may fail if table is empty, that's okay
@@ -112,9 +121,9 @@ impl RagStore {
     
     /// Insert a document with its embedding
     pub async fn insert(&self, doc: NewDocument) -> RagResult<i64> {
-        if doc.embedding.len() != self.config.embedding_dim {
+        if doc.embedding.len() != self.config.embedding_dim() {
             return Err(RagError::DimensionMismatch {
-                expected: self.config.embedding_dim,
+                expected: self.config.embedding_dim(),
                 actual: doc.embedding.len(),
             });
         }
@@ -126,7 +135,7 @@ impl RagStore {
         
         let query = format!(
             "INSERT INTO {} (content, embedding, metadata) VALUES ($1, $2, $3) RETURNING id",
-            self.config.table_name
+            self.config.table_name()
         );
         
         let row = client.query_one(&query, &[&doc.content, &embedding, &doc.metadata]).await
@@ -150,9 +159,9 @@ impl RagStore {
     
     /// Search for similar documents using vector similarity
     pub async fn search(&self, query_embedding: &[f32], limit: Option<usize>) -> RagResult<Vec<Document>> {
-        if query_embedding.len() != self.config.embedding_dim {
+        if query_embedding.len() != self.config.embedding_dim() {
             return Err(RagError::DimensionMismatch {
-                expected: self.config.embedding_dim,
+                expected: self.config.embedding_dim(),
                 actual: query_embedding.len(),
             });
         }
@@ -161,15 +170,17 @@ impl RagStore {
             .map_err(|e| RagError::ConnectionFailed(format!("{}", e)))?;
         
         let embedding = Vector::from(query_embedding.to_vec());
-        let limit = limit.unwrap_or(self.config.max_results) as i64;
-        let operator = self.config.distance_metric.operator();
+        let limit = limit.unwrap_or(self.config.max_results()) as i64;
+        let operator = self.config.distance_metric().operator();
         
         // For cosine distance, convert to similarity (1 - distance)
-        let score_expr = match self.config.distance_metric {
+        let score_expr = match self.config.distance_metric() {
             super::DistanceMetric::Cosine => format!("1 - (embedding {} $1)", operator),
             super::DistanceMetric::L2 => format!("1 / (1 + (embedding {} $1))", operator),
             super::DistanceMetric::InnerProduct => format!("-(embedding {} $1)", operator),
         };
+        
+        let min_sim = self.config.min_similarity();
         
         let query = format!(
             r#"
@@ -180,12 +191,12 @@ impl RagStore {
             LIMIT $3
             "#,
             score_expr,
-            self.config.table_name,
+            self.config.table_name(),
             score_expr,
             operator
         );
         
-        let rows = client.query(&query, &[&embedding, &self.config.min_similarity, &limit]).await
+        let rows = client.query(&query, &[&embedding, &min_sim, &limit]).await
             .map_err(|e| RagError::QueryFailed(format!("{}", e)))?;
         
         let docs = rows.iter().map(|row| {
@@ -207,7 +218,7 @@ impl RagStore {
         
         let query = format!(
             "SELECT id, content, metadata FROM {} WHERE id = $1",
-            self.config.table_name
+            self.config.table_name()
         );
         
         let row = client.query_opt(&query, &[&id]).await
@@ -226,7 +237,7 @@ impl RagStore {
         let client = self.pool.get().await
             .map_err(|e| RagError::ConnectionFailed(format!("{}", e)))?;
         
-        let query = format!("DELETE FROM {} WHERE id = $1", self.config.table_name);
+        let query = format!("DELETE FROM {} WHERE id = $1", self.config.table_name());
         let affected = client.execute(&query, &[&id]).await
             .map_err(|e| RagError::QueryFailed(format!("{}", e)))?;
         
@@ -238,7 +249,7 @@ impl RagStore {
         let client = self.pool.get().await
             .map_err(|e| RagError::ConnectionFailed(format!("{}", e)))?;
         
-        let query = format!("SELECT COUNT(*) FROM {}", self.config.table_name);
+        let query = format!("SELECT COUNT(*) FROM {}", self.config.table_name());
         let row = client.query_one(&query, &[]).await
             .map_err(|e| RagError::QueryFailed(format!("{}", e)))?;
         
@@ -250,7 +261,7 @@ impl RagStore {
         let client = self.pool.get().await
             .map_err(|e| RagError::ConnectionFailed(format!("{}", e)))?;
         
-        let query = format!("DELETE FROM {}", self.config.table_name);
+        let query = format!("DELETE FROM {}", self.config.table_name());
         let affected = client.execute(&query, &[]).await
             .map_err(|e| RagError::QueryFailed(format!("{}", e)))?;
         

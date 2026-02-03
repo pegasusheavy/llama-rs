@@ -211,31 +211,39 @@ enum Commands {
 enum RagAction {
     /// Initialize RAG database table
     Init {
-        /// PostgreSQL connection string
+        /// Path to TOML config file (optional, also checks rag.toml)
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// PostgreSQL connection string (overrides config file)
         #[arg(long, env = "RAG_DATABASE_URL")]
-        database_url: String,
+        database_url: Option<String>,
 
-        /// Embeddings table name
-        #[arg(long, default_value = "embeddings")]
-        table: String,
+        /// Embeddings table name (overrides config file)
+        #[arg(long)]
+        table: Option<String>,
 
-        /// Embedding dimension
-        #[arg(long, default_value = "384")]
-        dim: usize,
+        /// Embedding dimension (overrides config file)
+        #[arg(long)]
+        dim: Option<usize>,
     },
 
     /// Index documents into the vector store
     Index {
-        /// PostgreSQL connection string
-        #[arg(long, env = "RAG_DATABASE_URL")]
-        database_url: String,
-
         /// Path to file or directory to index
         path: String,
 
-        /// Embeddings table name
-        #[arg(long, default_value = "embeddings")]
-        table: String,
+        /// Path to TOML config file
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// PostgreSQL connection string (overrides config file)
+        #[arg(long, env = "RAG_DATABASE_URL")]
+        database_url: Option<String>,
+
+        /// Embeddings table name (overrides config file)
+        #[arg(long)]
+        table: Option<String>,
 
         /// Chunk size in characters
         #[arg(long, default_value = "500")]
@@ -248,31 +256,46 @@ enum RagAction {
 
     /// Search the vector store
     Search {
-        /// PostgreSQL connection string
-        #[arg(long, env = "RAG_DATABASE_URL")]
-        database_url: String,
-
         /// Search query
         query: String,
 
-        /// Embeddings table name
-        #[arg(long, default_value = "embeddings")]
-        table: String,
+        /// Path to TOML config file
+        #[arg(short, long)]
+        config: Option<String>,
 
-        /// Number of results
-        #[arg(short, long, default_value = "5")]
-        limit: usize,
+        /// PostgreSQL connection string (overrides config file)
+        #[arg(long, env = "RAG_DATABASE_URL")]
+        database_url: Option<String>,
+
+        /// Embeddings table name (overrides config file)
+        #[arg(long)]
+        table: Option<String>,
+
+        /// Number of results (overrides config file)
+        #[arg(short, long)]
+        limit: Option<usize>,
     },
 
     /// Show RAG database statistics
     Stats {
-        /// PostgreSQL connection string
-        #[arg(long, env = "RAG_DATABASE_URL")]
-        database_url: String,
+        /// Path to TOML config file
+        #[arg(short, long)]
+        config: Option<String>,
 
-        /// Embeddings table name
-        #[arg(long, default_value = "embeddings")]
-        table: String,
+        /// PostgreSQL connection string (overrides config file)
+        #[arg(long, env = "RAG_DATABASE_URL")]
+        database_url: Option<String>,
+
+        /// Embeddings table name (overrides config file)
+        #[arg(long)]
+        table: Option<String>,
+    },
+
+    /// Generate an example configuration file
+    GenConfig {
+        /// Output path for the config file
+        #[arg(short, long, default_value = "rag.toml")]
+        output: String,
     },
 }
 
@@ -1433,42 +1456,62 @@ fn run_models_command(action: ModelAction) -> Result<(), Box<dyn std::error::Err
 /// Handle RAG subcommands
 #[cfg(feature = "rag")]
 fn run_rag_command(action: RagAction) -> Result<(), Box<dyn std::error::Error>> {
-    use llama_gguf::rag::{RagConfig, RagStore, RagContextBuilder};
+    use llama_gguf::rag::{RagConfig, RagStore, RagContextBuilder, example_config};
     
     // Create tokio runtime for async operations
     let rt = tokio::runtime::Runtime::new()?;
     
     match action {
-        RagAction::Init { database_url, table, dim } => {
+        RagAction::Init { config, database_url, table, dim } => {
             rt.block_on(async {
+                // Load config with precedence: CLI args > env vars > config file > defaults
+                let mut cfg = RagConfig::load(config.as_deref())?;
+                
+                // Apply CLI overrides
+                if let Some(url) = database_url {
+                    cfg.database.connection_string = url;
+                }
+                if let Some(t) = table {
+                    cfg.embeddings.table_name = t;
+                }
+                if let Some(d) = dim {
+                    cfg.embeddings.dimension = d;
+                }
+                
                 println!("Initializing RAG database...");
-                println!("  Table: {}", table);
-                println!("  Embedding dimension: {}", dim);
+                println!("  Table: {}", cfg.table_name());
+                println!("  Embedding dimension: {}", cfg.embedding_dim());
                 
-                let config = RagConfig::new(&database_url)
-                    .with_table(&table)
-                    .with_dim(dim);
-                
-                let store = RagStore::connect(config).await?;
+                let store = RagStore::connect(cfg).await?;
                 store.create_table().await?;
                 
                 println!("\nDatabase initialized successfully!");
                 println!("\nTo index documents:");
-                println!("  llama-gguf rag index --database-url '{}' <path>", database_url);
+                println!("  llama-gguf rag index <path>");
                 
                 Ok::<_, Box<dyn std::error::Error>>(())
             })?;
         }
         
-        RagAction::Index { database_url, path, table, chunk_size, chunk_overlap } => {
+        RagAction::Index { path, config, database_url, table, chunk_size, chunk_overlap } => {
             rt.block_on(async {
                 use llama_gguf::rag::{NewDocument, TextChunker};
                 use std::path::Path;
                 
+                // Load config
+                let mut cfg = RagConfig::load(config.as_deref())?;
+                
+                // Apply CLI overrides
+                if let Some(url) = database_url {
+                    cfg.database.connection_string = url;
+                }
+                if let Some(t) = table {
+                    cfg.embeddings.table_name = t;
+                }
+                
                 println!("Indexing documents from: {}", path);
                 
-                let config = RagConfig::new(&database_url).with_table(&table);
-                let store = RagStore::connect(config).await?;
+                let store = RagStore::connect(cfg).await?;
                 
                 let chunker = TextChunker::new(chunk_size).with_overlap(chunk_overlap);
                 let path = Path::new(&path);
@@ -1480,8 +1523,7 @@ fn run_rag_command(action: RagAction) -> Result<(), Box<dyn std::error::Error>> 
                     let chunks = chunker.chunk(&content);
                     
                     for chunk in chunks {
-                        // Generate a simple embedding (placeholder - use a real embedding model)
-                        let embedding = vec![0.0f32; store.config().embedding_dim];
+                        let embedding = vec![0.0f32; store.config().embedding_dim()];
                         
                         let doc = NewDocument {
                             content: chunk,
@@ -1504,7 +1546,7 @@ fn run_rag_command(action: RagAction) -> Result<(), Box<dyn std::error::Error>> 
                                 let chunks = chunker.chunk(&content);
                                 
                                 for chunk in chunks {
-                                    let embedding = vec![0.0f32; store.config().embedding_dim];
+                                    let embedding = vec![0.0f32; store.config().embedding_dim()];
                                     
                                     let doc = NewDocument {
                                         content: chunk,
@@ -1529,21 +1571,31 @@ fn run_rag_command(action: RagAction) -> Result<(), Box<dyn std::error::Error>> 
             })?;
         }
         
-        RagAction::Search { database_url, query, table, limit } => {
+        RagAction::Search { query, config, database_url, table, limit } => {
             rt.block_on(async {
+                // Load config
+                let mut cfg = RagConfig::load(config.as_deref())?;
+                
+                // Apply CLI overrides
+                if let Some(url) = database_url {
+                    cfg.database.connection_string = url;
+                }
+                if let Some(t) = table {
+                    cfg.embeddings.table_name = t;
+                }
+                if let Some(l) = limit {
+                    cfg.search.max_results = l;
+                }
+                
                 println!("Searching for: \"{}\"", query);
                 println!();
                 
-                let config = RagConfig::new(&database_url)
-                    .with_table(&table)
-                    .with_max_results(limit);
-                
-                let store = RagStore::connect(config).await?;
+                let store = RagStore::connect(cfg).await?;
                 
                 // Generate query embedding (placeholder)
-                let query_embedding = vec![0.0f32; store.config().embedding_dim];
+                let query_embedding = vec![0.0f32; store.config().embedding_dim()];
                 
-                let results = store.search(&query_embedding, Some(limit)).await?;
+                let results = store.search(&query_embedding, limit).await?;
                 
                 if results.is_empty() {
                     println!("No results found.");
@@ -1579,22 +1631,39 @@ fn run_rag_command(action: RagAction) -> Result<(), Box<dyn std::error::Error>> 
             })?;
         }
         
-        RagAction::Stats { database_url, table } => {
+        RagAction::Stats { config, database_url, table } => {
             rt.block_on(async {
-                let config = RagConfig::new(&database_url).with_table(&table);
-                let store = RagStore::connect(config).await?;
+                // Load config
+                let mut cfg = RagConfig::load(config.as_deref())?;
+                
+                // Apply CLI overrides
+                if let Some(url) = database_url {
+                    cfg.database.connection_string = url;
+                }
+                if let Some(t) = table {
+                    cfg.embeddings.table_name = t;
+                }
+                
+                let store = RagStore::connect(cfg).await?;
                 
                 let count = store.count().await?;
                 
                 println!("RAG Database Statistics");
                 println!("{}", "-".repeat(40));
-                println!("Table: {}", table);
+                println!("Table: {}", store.config().table_name());
                 println!("Documents: {}", count);
-                println!("Embedding dimension: {}", store.config().embedding_dim);
-                println!("Distance metric: {:?}", store.config().distance_metric);
+                println!("Embedding dimension: {}", store.config().embedding_dim());
+                println!("Distance metric: {:?}", store.config().distance_metric());
                 
                 Ok::<_, Box<dyn std::error::Error>>(())
             })?;
+        }
+        
+        RagAction::GenConfig { output } => {
+            std::fs::write(&output, example_config())?;
+            println!("Generated example configuration: {}", output);
+            println!("\nEdit this file to configure your RAG database connection.");
+            println!("Then use: llama-gguf rag init --config {}", output);
         }
     }
     
