@@ -196,6 +196,84 @@ enum Commands {
         #[command(subcommand)]
         action: ModelAction,
     },
+
+    /// RAG (Retrieval-Augmented Generation) operations
+    #[cfg(feature = "rag")]
+    Rag {
+        #[command(subcommand)]
+        action: RagAction,
+    },
+}
+
+/// RAG subcommands
+#[cfg(feature = "rag")]
+#[derive(Subcommand)]
+enum RagAction {
+    /// Initialize RAG database table
+    Init {
+        /// PostgreSQL connection string
+        #[arg(long, env = "RAG_DATABASE_URL")]
+        database_url: String,
+
+        /// Embeddings table name
+        #[arg(long, default_value = "embeddings")]
+        table: String,
+
+        /// Embedding dimension
+        #[arg(long, default_value = "384")]
+        dim: usize,
+    },
+
+    /// Index documents into the vector store
+    Index {
+        /// PostgreSQL connection string
+        #[arg(long, env = "RAG_DATABASE_URL")]
+        database_url: String,
+
+        /// Path to file or directory to index
+        path: String,
+
+        /// Embeddings table name
+        #[arg(long, default_value = "embeddings")]
+        table: String,
+
+        /// Chunk size in characters
+        #[arg(long, default_value = "500")]
+        chunk_size: usize,
+
+        /// Chunk overlap in characters
+        #[arg(long, default_value = "50")]
+        chunk_overlap: usize,
+    },
+
+    /// Search the vector store
+    Search {
+        /// PostgreSQL connection string
+        #[arg(long, env = "RAG_DATABASE_URL")]
+        database_url: String,
+
+        /// Search query
+        query: String,
+
+        /// Embeddings table name
+        #[arg(long, default_value = "embeddings")]
+        table: String,
+
+        /// Number of results
+        #[arg(short, long, default_value = "5")]
+        limit: usize,
+    },
+
+    /// Show RAG database statistics
+    Stats {
+        /// PostgreSQL connection string
+        #[arg(long, env = "RAG_DATABASE_URL")]
+        database_url: String,
+
+        /// Embeddings table name
+        #[arg(long, default_value = "embeddings")]
+        table: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -346,6 +424,13 @@ fn main() {
         }
         Commands::Models { action } => {
             if let Err(e) = run_models_command(action) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        #[cfg(feature = "rag")]
+        Commands::Rag { action } => {
+            if let Err(e) = run_rag_command(action) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -1342,5 +1427,176 @@ fn run_models_command(action: ModelAction) -> Result<(), Box<dyn std::error::Err
         }
     }
 
+    Ok(())
+}
+
+/// Handle RAG subcommands
+#[cfg(feature = "rag")]
+fn run_rag_command(action: RagAction) -> Result<(), Box<dyn std::error::Error>> {
+    use llama_gguf::rag::{RagConfig, RagStore, RagContextBuilder};
+    
+    // Create tokio runtime for async operations
+    let rt = tokio::runtime::Runtime::new()?;
+    
+    match action {
+        RagAction::Init { database_url, table, dim } => {
+            rt.block_on(async {
+                println!("Initializing RAG database...");
+                println!("  Table: {}", table);
+                println!("  Embedding dimension: {}", dim);
+                
+                let config = RagConfig::new(&database_url)
+                    .with_table(&table)
+                    .with_dim(dim);
+                
+                let store = RagStore::connect(config).await?;
+                store.create_table().await?;
+                
+                println!("\nDatabase initialized successfully!");
+                println!("\nTo index documents:");
+                println!("  llama-gguf rag index --database-url '{}' <path>", database_url);
+                
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
+        }
+        
+        RagAction::Index { database_url, path, table, chunk_size, chunk_overlap } => {
+            rt.block_on(async {
+                use llama_gguf::rag::{NewDocument, TextChunker};
+                use std::path::Path;
+                
+                println!("Indexing documents from: {}", path);
+                
+                let config = RagConfig::new(&database_url).with_table(&table);
+                let store = RagStore::connect(config).await?;
+                
+                let chunker = TextChunker::new(chunk_size).with_overlap(chunk_overlap);
+                let path = Path::new(&path);
+                
+                let mut total_chunks = 0;
+                
+                if path.is_file() {
+                    let content = std::fs::read_to_string(path)?;
+                    let chunks = chunker.chunk(&content);
+                    
+                    for chunk in chunks {
+                        // Generate a simple embedding (placeholder - use a real embedding model)
+                        let embedding = vec![0.0f32; store.config().embedding_dim];
+                        
+                        let doc = NewDocument {
+                            content: chunk,
+                            embedding,
+                            metadata: Some(serde_json::json!({
+                                "source": path.to_string_lossy()
+                            })),
+                        };
+                        
+                        store.insert(doc).await?;
+                        total_chunks += 1;
+                    }
+                } else if path.is_dir() {
+                    for entry in std::fs::read_dir(path)? {
+                        let entry = entry?;
+                        let file_path = entry.path();
+                        
+                        if file_path.is_file() {
+                            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                                let chunks = chunker.chunk(&content);
+                                
+                                for chunk in chunks {
+                                    let embedding = vec![0.0f32; store.config().embedding_dim];
+                                    
+                                    let doc = NewDocument {
+                                        content: chunk,
+                                        embedding,
+                                        metadata: Some(serde_json::json!({
+                                            "source": file_path.to_string_lossy()
+                                        })),
+                                    };
+                                    
+                                    store.insert(doc).await?;
+                                    total_chunks += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                println!("\nIndexed {} chunks", total_chunks);
+                println!("\nNote: Using placeholder embeddings. For production, integrate a real embedding model.");
+                
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
+        }
+        
+        RagAction::Search { database_url, query, table, limit } => {
+            rt.block_on(async {
+                println!("Searching for: \"{}\"", query);
+                println!();
+                
+                let config = RagConfig::new(&database_url)
+                    .with_table(&table)
+                    .with_max_results(limit);
+                
+                let store = RagStore::connect(config).await?;
+                
+                // Generate query embedding (placeholder)
+                let query_embedding = vec![0.0f32; store.config().embedding_dim];
+                
+                let results = store.search(&query_embedding, Some(limit)).await?;
+                
+                if results.is_empty() {
+                    println!("No results found.");
+                } else {
+                    println!("Found {} results:\n", results.len());
+                    
+                    for (i, doc) in results.iter().enumerate() {
+                        let score = doc.score.map(|s| format!("{:.4}", s)).unwrap_or_default();
+                        let preview: String = doc.content.chars().take(200).collect();
+                        
+                        println!("{}. [{}] {}", i + 1, score, preview);
+                        if let Some(meta) = &doc.metadata {
+                            if let Some(source) = meta.get("source") {
+                                println!("   Source: {}", source);
+                            }
+                        }
+                        println!();
+                    }
+                    
+                    // Show context builder example
+                    let context = RagContextBuilder::new(results)
+                        .with_scores(true)
+                        .build();
+                    
+                    println!("--- Combined Context ---");
+                    println!("{}", &context[..context.len().min(500)]);
+                    if context.len() > 500 {
+                        println!("... (truncated)");
+                    }
+                }
+                
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
+        }
+        
+        RagAction::Stats { database_url, table } => {
+            rt.block_on(async {
+                let config = RagConfig::new(&database_url).with_table(&table);
+                let store = RagStore::connect(config).await?;
+                
+                let count = store.count().await?;
+                
+                println!("RAG Database Statistics");
+                println!("{}", "-".repeat(40));
+                println!("Table: {}", table);
+                println!("Documents: {}", count);
+                println!("Embedding dimension: {}", store.config().embedding_dim);
+                println!("Distance metric: {:?}", store.config().distance_metric);
+                
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
+        }
+    }
+    
     Ok(())
 }

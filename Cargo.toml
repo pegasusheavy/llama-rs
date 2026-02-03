@@ -24,6 +24,7 @@ cuda = ["dep:cudarc"]
 vulkan = ["dep:ash", "dep:gpu-allocator"]
 metal = ["dep:metal", "dep:objc"]
 server = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:futures"]
+rag = ["dep:tokio-postgres", "dep:pgvector", "dep:deadpool-postgres", "dep:tokio", "dep:url"]
 
 [dependencies]
 memmap2 = "0.9"
@@ -32,7 +33,7 @@ half = { version = "2.3", features = ["bytemuck"] }
 rayon = "1.8"
 thiserror = "1.0"
 tracing = "0.1"
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.4", features = ["derive", "env"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rand = "0.8"
@@ -50,6 +51,12 @@ axum = { version = "0.7", optional = true }
 tokio = { version = "1.35", features = ["full"], optional = true }
 tower-http = { version = "0.5", features = ["cors"], optional = true }
 futures = { version = "0.3", optional = true }
+
+# RAG / pgvector support
+tokio-postgres = { version = "0.7", optional = true, features = ["with-serde_json-1"] }
+pgvector = { version = "0.4", features = ["postgres"], optional = true }
+deadpool-postgres = { version = "0.14", optional = true }
+url = { version = "2.5", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
