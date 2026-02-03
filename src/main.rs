@@ -115,6 +115,17 @@ enum Commands {
         /// Port to listen on
         #[arg(short, long, default_value = "8080")]
         port: u16,
+
+        /// Enable RAG with PostgreSQL/pgvector database URL
+        /// Format: postgres://user:pass@host:port/database
+        #[cfg(feature = "rag")]
+        #[arg(long, env = "RAG_DATABASE_URL")]
+        rag_database_url: Option<String>,
+
+        /// Path to RAG config file (alternative to --rag-database-url)
+        #[cfg(feature = "rag")]
+        #[arg(long)]
+        rag_config: Option<String>,
     },
 
     /// Quantize a model to a different format
@@ -577,8 +588,42 @@ fn main() {
             }
         }
         #[cfg(feature = "server")]
-        Commands::Serve { model, host, port } => {
-            if let Err(e) = run_server(&model, &host, port) {
+        Commands::Serve { 
+            model, 
+            host, 
+            port,
+            #[cfg(feature = "rag")]
+            rag_database_url,
+            #[cfg(feature = "rag")]
+            rag_config,
+        } => {
+            // Determine RAG database URL
+            #[cfg(feature = "rag")]
+            let rag_url = if let Some(url) = rag_database_url {
+                Some(url)
+            } else if let Some(config_path) = rag_config {
+                // Load URL from config file
+                match llama_gguf::rag::RagConfig::load(Some(&config_path)) {
+                    Ok(config) => Some(config.connection_string().to_string()),
+                    Err(e) => {
+                        eprintln!("Warning: Failed to load RAG config: {}", e);
+                        None
+                    }
+                }
+            } else {
+                // Try default config locations
+                match llama_gguf::rag::RagConfig::load(None::<&str>) {
+                    Ok(config) if !config.connection_string().is_empty() => {
+                        Some(config.connection_string().to_string())
+                    }
+                    _ => None
+                }
+            };
+
+            #[cfg(not(feature = "rag"))]
+            let rag_url: Option<String> = None;
+
+            if let Err(e) = run_server(&model, &host, port, rag_url) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
@@ -647,13 +692,15 @@ fn main() {
 }
 
 #[cfg(feature = "server")]
-fn run_server(model_path: &str, host: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+fn run_server(model_path: &str, host: &str, port: u16, rag_database_url: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         llama_gguf::server::run_server(llama_gguf::server::ServerConfig {
             host: host.to_string(),
             port,
             model_path: model_path.to_string(),
+            #[cfg(feature = "rag")]
+            rag_database_url,
         })
         .await
     })

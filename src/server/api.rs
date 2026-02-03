@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
@@ -22,6 +22,9 @@ pub struct ServerConfig {
     pub port: u16,
     /// Path to the GGUF model file
     pub model_path: String,
+    /// RAG database URL (optional)
+    #[cfg(feature = "rag")]
+    pub rag_database_url: Option<String>,
 }
 
 /// Run the HTTP server
@@ -52,7 +55,7 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
         .to_string();
 
     // Create shared state
-    let state = Arc::new(AppState {
+    let app_state = Arc::new(AppState {
         model: Arc::new(model),
         tokenizer: Arc::new(tokenizer),
         config: model_config,
@@ -66,24 +69,62 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Build router
-    let app = Router::new()
+    // Build base router with OpenAI-compatible endpoints
+    let mut app = Router::new()
         // OpenAI-compatible endpoints
         .route("/v1/chat/completions", post(handlers::chat_completions))
         .route("/v1/completions", post(handlers::completions))
         .route("/v1/models", get(handlers::list_models))
         // Health and status
         .route("/health", get(handlers::health))
-        .route("/", get(|| async { "llama-rs server" }))
-        .layer(cors)
-        .with_state(state);
+        .route("/", get(|| async { "llama-gguf server" }))
+        .with_state(app_state.clone());
+
+    // Add RAG endpoints if configured
+    #[cfg(feature = "rag")]
+    let rag_enabled = config.rag_database_url.is_some();
+    #[cfg(not(feature = "rag"))]
+    let rag_enabled = false;
+
+    #[cfg(feature = "rag")]
+    if let Some(ref db_url) = config.rag_database_url {
+        use crate::rag::RagConfig;
+        use super::handlers::RagState;
+
+        eprintln!("RAG enabled with database connection");
+
+        let rag_config = RagConfig::new(db_url);
+        let rag_state = Arc::new(RagState::new(rag_config));
+
+        // RAG-only routes
+        let rag_routes = Router::new()
+            // Bedrock-style Knowledge Base APIs
+            .route("/knowledgebases", post(handlers::list_knowledge_bases))
+            .route("/knowledgebases/:kb_id", get(handlers::get_knowledge_base))
+            .route("/knowledgebases/:kb_id", delete(handlers::delete_knowledge_base))
+            // Retrieval APIs
+            .route("/retrieve", post(handlers::retrieve))
+            .route("/ingest", post(handlers::ingest))
+            .with_state(rag_state.clone());
+
+        // RAG + Model routes (need both states)
+        let rag_gen_routes = Router::new()
+            .route("/retrieveAndGenerate", post(handlers::retrieve_and_generate))
+            .with_state((app_state.clone(), rag_state));
+
+        app = app
+            .nest("/v1/rag", rag_routes)
+            .nest("/v1/rag", rag_gen_routes);
+    }
+
+    app = app.layer(cors);
 
     let addr = format!("{}:{}", config.host, config.port);
     let socket_addr: SocketAddr = addr.parse()?;
 
     eprintln!();
     eprintln!("╭─────────────────────────────────────────────────────────────────╮");
-    eprintln!("│                     llama-rs Server                              │");
+    eprintln!("│                     llama-gguf Server                            │");
     eprintln!("├─────────────────────────────────────────────────────────────────┤");
     eprintln!("│ Listening on: http://{:<44} │", addr);
     eprintln!("├─────────────────────────────────────────────────────────────────┤");
@@ -92,6 +133,16 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
     eprintln!("│   POST /v1/completions       - Text completions (OpenAI API)     │");
     eprintln!("│   GET  /v1/models            - List models                       │");
     eprintln!("│   GET  /health               - Health check                      │");
+    if rag_enabled {
+        eprintln!("├─────────────────────────────────────────────────────────────────┤");
+        eprintln!("│ RAG / Knowledge Base Endpoints (Bedrock-style):                 │");
+        eprintln!("│   POST /v1/rag/retrieve            - Retrieve from KB           │");
+        eprintln!("│   POST /v1/rag/retrieveAndGenerate - RAG pipeline               │");
+        eprintln!("│   POST /v1/rag/ingest              - Ingest documents           │");
+        eprintln!("│   POST /v1/rag/knowledgebases      - List knowledge bases       │");
+        eprintln!("│   GET  /v1/rag/knowledgebases/:id  - Get KB details             │");
+        eprintln!("│   DEL  /v1/rag/knowledgebases/:id  - Delete KB                  │");
+    }
     eprintln!("╰─────────────────────────────────────────────────────────────────╯");
     eprintln!();
 
