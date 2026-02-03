@@ -370,7 +370,7 @@ pub async fn retrieve(
     State(rag_state): State<Arc<RagState>>,
     Json(request): Json<RetrieveRequest>,
 ) -> Response {
-    use crate::rag::{KnowledgeBase, KnowledgeBaseConfig, RetrievalConfig, MetadataFilter};
+    use crate::rag::{KnowledgeBase, KnowledgeBaseConfig, RetrievalConfig};
 
     // Get or create knowledge base config
     let kb_config = {
@@ -399,8 +399,8 @@ pub async fn retrieve(
     // Build retrieval config
     let mut retrieval_config = RetrievalConfig::default();
     
-    if let Some(ref config) = request.retrieval_configuration {
-        if let Some(ref vs_config) = config.vector_search_configuration {
+    if let Some(ref config) = request.retrieval_configuration
+        && let Some(ref vs_config) = config.vector_search_configuration {
             retrieval_config.max_results = vs_config.number_of_results;
             
             // Convert filter if provided
@@ -408,7 +408,6 @@ pub async fn retrieve(
                 retrieval_config.filter = convert_filter(filter);
             }
         }
-    }
 
     // Perform retrieval
     match kb.retrieve(&request.query, Some(retrieval_config)).await {
@@ -482,22 +481,20 @@ pub async fn retrieve_and_generate(
     // Build retrieval config
     let mut retrieval_config = RetrievalConfig::default();
     
-    if let Some(ref config) = request.retrieve_and_generate_configuration.knowledge_base_configuration.retrieval_configuration {
-        if let Some(ref vs_config) = config.vector_search_configuration {
+    if let Some(ref config) = request.retrieve_and_generate_configuration.knowledge_base_configuration.retrieval_configuration
+        && let Some(ref vs_config) = config.vector_search_configuration {
             retrieval_config.max_results = vs_config.number_of_results;
         }
-    }
 
     // Get prompt template if provided
-    if let Some(ref gen_config) = request.retrieve_and_generate_configuration.knowledge_base_configuration.generation_configuration {
-        if let Some(ref template) = gen_config.prompt_template {
+    if let Some(ref gen_config) = request.retrieve_and_generate_configuration.knowledge_base_configuration.generation_configuration
+        && let Some(ref template) = gen_config.prompt_template {
             // Convert Bedrock template format ($query$, $search_results$) to our format ({query}, {context})
             let converted = template.text_prompt_template
                 .replace("$query$", "{query}")
                 .replace("$search_results$", "{context}");
             retrieval_config.prompt_template = Some(converted);
         }
-    }
 
     // Perform retrieval
     let rag_response = match kb.retrieve_and_generate(&request.input.text, Some(retrieval_config)).await {
@@ -792,7 +789,7 @@ fn convert_filter(filter: &RetrievalFilter) -> Option<crate::rag::MetadataFilter
     // Handle AND
     if let Some(ref and_filters) = filter.and_all {
         let converted: Vec<_> = and_filters.iter()
-            .filter_map(|f| convert_filter(f))
+            .filter_map(convert_filter)
             .collect();
         if !converted.is_empty() {
             return Some(MetadataFilter::and(converted));
@@ -802,7 +799,7 @@ fn convert_filter(filter: &RetrievalFilter) -> Option<crate::rag::MetadataFilter
     // Handle OR
     if let Some(ref or_filters) = filter.or_all {
         let converted: Vec<_> = or_filters.iter()
-            .filter_map(|f| convert_filter(f))
+            .filter_map(convert_filter)
             .collect();
         if !converted.is_empty() {
             return Some(MetadataFilter::or(converted));
@@ -830,18 +827,16 @@ fn convert_filter(filter: &RetrievalFilter) -> Option<crate::rag::MetadataFilter
     }
 
     // Handle string contains
-    if let Some(ref cond) = filter.string_contains {
-        if let Some(s) = cond.value.as_str() {
+    if let Some(ref cond) = filter.string_contains
+        && let Some(s) = cond.value.as_str() {
             return Some(MetadataFilter::contains(&cond.key, s));
         }
-    }
 
     // Handle starts with
-    if let Some(ref cond) = filter.starts_with {
-        if let Some(s) = cond.value.as_str() {
+    if let Some(ref cond) = filter.starts_with
+        && let Some(s) = cond.value.as_str() {
             return Some(MetadataFilter::starts_with(&cond.key, s));
         }
-    }
 
     None
 }

@@ -243,8 +243,8 @@ impl Tokenizer {
                 if let MetadataValue::String(merge_str) = value {
                     // Parse merge: "token1 token2"
                     let parts: Vec<&str> = merge_str.split(' ').collect();
-                    if parts.len() == 2 {
-                        if let (Some(&id1), Some(&id2)) =
+                    if parts.len() == 2
+                        && let (Some(&id1), Some(&id2)) =
                             (token_to_id.get(parts[0]), token_to_id.get(parts[1]))
                         {
                             // The merged result is typically the concatenation
@@ -253,7 +253,6 @@ impl Tokenizer {
                                 merges.insert((id1, id2), (merged_id, priority));
                             }
                         }
-                    }
                 }
             }
         }
@@ -330,11 +329,10 @@ impl Tokenizer {
 
                 for i in 0..tokens.len() - 1 {
                     let pair = (tokens[i], tokens[i + 1]);
-                    if let Some(&(merged_id, priority)) = self.merges.get(&pair) {
-                        if best_merge.is_none() || priority < best_merge.unwrap().2 {
+                    if let Some(&(merged_id, priority)) = self.merges.get(&pair)
+                        && (best_merge.is_none() || priority < best_merge.unwrap().2) {
                             best_merge = Some((i, merged_id, priority));
                         }
-                    }
                 }
 
                 // Apply the best merge if found
@@ -364,12 +362,11 @@ impl Tokenizer {
             current.push(ch);
             
             // Check if current string exists in vocab or if it's a word boundary
-            if ch.is_whitespace() || ch.is_ascii_punctuation() {
-                if !current.is_empty() {
+            if (ch.is_whitespace() || ch.is_ascii_punctuation())
+                && !current.is_empty() {
                     segments.push(current.clone());
                     current.clear();
                 }
-            }
         }
 
         if !current.is_empty() {
@@ -393,12 +390,11 @@ impl Tokenizer {
             }
 
             // Try SentencePiece format (▁ prefix for space)
-            if ch == ' ' {
-                if let Some(&id) = self.token_to_id.get("▁") {
+            if ch == ' '
+                && let Some(&id) = self.token_to_id.get("▁") {
                     tokens.push(id);
                     continue;
                 }
-            }
 
             // Try byte fallback
             for byte in ch_str.as_bytes() {
@@ -451,11 +447,10 @@ impl Tokenizer {
                 continue;
             }
 
-            if let Some(pad_id) = self.special_tokens.pad_token_id {
-                if token_id == pad_id {
+            if let Some(pad_id) = self.special_tokens.pad_token_id
+                && token_id == pad_id {
                     continue;
                 }
-            }
 
             let token_str = self
                 .id_to_token
@@ -463,12 +458,11 @@ impl Tokenizer {
                 .ok_or_else(|| TokenizerError::InvalidToken(format!("Unknown token ID: {}", token_id)))?;
 
             // Handle byte tokens - collect into buffer for proper UTF-8 decoding
-            if token_str.starts_with("<0x") && token_str.ends_with('>') && token_str.len() == 6 {
-                if let Ok(byte) = u8::from_str_radix(&token_str[3..5], 16) {
+            if token_str.starts_with("<0x") && token_str.ends_with('>') && token_str.len() == 6
+                && let Ok(byte) = u8::from_str_radix(&token_str[3..5], 16) {
                     byte_buffer.push(byte);
                     continue;
                 }
-            }
 
             // Flush byte buffer before adding text
             if !byte_buffer.is_empty() {

@@ -272,15 +272,14 @@ impl LoraAdapters {
                         if let (Ok(a_floats), Ok(b_floats)) = (
                             bytemuck::try_cast_slice::<u8, f32>(a_data),
                             bytemuck::try_cast_slice::<u8, f32>(b_data),
-                        ) {
-                            if let (Ok(a_tensor), Ok(b_tensor)) = (
+                        )
+                            && let (Ok(a_tensor), Ok(b_tensor)) = (
                                 Tensor::from_f32(a_floats, a_shape),
                                 Tensor::from_f32(b_floats, b_shape),
                             ) {
                                 let adapter = LoraAdapter::from_tensors(a_tensor, b_tensor, config.scaling());
                                 adapters.insert(base_name.to_string(), adapter);
                             }
-                        }
                     }
                 }
             }

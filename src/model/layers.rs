@@ -36,15 +36,14 @@ impl Linear {
         let in_features = weight.shape()[0];
         let out_features = weight.shape()[1];
 
-        if let Some(ref b) = bias {
-            if b.shape() != [out_features] {
+        if let Some(ref b) = bias
+            && b.shape() != [out_features] {
                 return Err(ModelError::TensorShapeMismatch {
                     name: "bias".into(),
                     expected: vec![out_features],
                     got: b.shape().to_vec(),
                 });
             }
-        }
 
         Ok(Self {
             weight,

@@ -181,12 +181,11 @@ impl PromptCache {
         }
 
         // Update access time for matched entry
-        if let Some((ref id, _)) = best_match {
-            if let Some(entry) = self.entries.get_mut(id) {
+        if let Some((ref id, _)) = best_match
+            && let Some(entry) = self.entries.get_mut(id) {
                 entry.last_access = std::time::Instant::now();
                 entry.ref_count += 1;
             }
-        }
 
         best_match
     }
@@ -319,8 +318,8 @@ impl PrefixSharing {
         v_cache: &[Tensor],
     ) -> PrefixId {
         // Clone the cache tensors
-        let k_cloned: Vec<Tensor> = k_cache.iter().cloned().collect();
-        let v_cloned: Vec<Tensor> = v_cache.iter().cloned().collect();
+        let k_cloned: Vec<Tensor> = k_cache.to_vec();
+        let v_cloned: Vec<Tensor> = v_cache.to_vec();
 
         let id = self.cache.cache_prefix(tokens, k_cloned, v_cloned);
         self.active_prefix = Some(id.clone());

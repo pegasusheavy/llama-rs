@@ -372,7 +372,7 @@ impl Sampler {
         // Update mu based on the surprise of the selected token
         let selected_prob = logits[token_id];
         let surprise = -selected_prob.log2();
-        self.mirostat_mu = self.mirostat_mu - config.eta * (surprise - config.tau);
+        self.mirostat_mu -= config.eta * (surprise - config.tau);
 
         // Clamp mu to reasonable bounds
         self.mirostat_mu = self.mirostat_mu.clamp(0.0, 20.0);

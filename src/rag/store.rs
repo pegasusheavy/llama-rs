@@ -266,7 +266,7 @@ impl MetadataFilter {
                 if values.is_empty() {
                     return "FALSE".to_string();
                 }
-                let placeholders: Vec<String> = values.iter().enumerate().map(|(i, v)| {
+                let placeholders: Vec<String> = values.iter().enumerate().map(|(i, _v)| {
                     let param_idx = param_offset + params.len() + 1 + i;
                     format!("${}", param_idx)
                 }).collect();
@@ -394,7 +394,7 @@ impl MetadataFilter {
     /// Filters are separated by `;` or newlines
     pub fn parse_many(s: &str) -> Result<Self, String> {
         let filters: Result<Vec<_>, _> = s
-            .split(|c| c == ';' || c == '\n')
+            .split([';', '\n'])
             .map(|p| p.trim())
             .filter(|p| !p.is_empty())
             .map(Self::parse)
@@ -870,11 +870,10 @@ impl RagContextBuilder {
                 doc.content.clone()
             };
             
-            if let Some(max) = max_chars {
-                if total_chars + part.len() > max {
+            if let Some(max) = max_chars
+                && total_chars + part.len() > max {
                     break;
                 }
-            }
             
             total_chars += part.len() + self.separator.len();
             parts.push(part);

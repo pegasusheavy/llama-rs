@@ -4,9 +4,8 @@ use std::sync::Arc;
 
 use crate::backend::Backend;
 use crate::model::LlamaModel;
-use crate::tensor::Tensor;
 
-use super::{RagError, RagResult};
+use super::RagResult;
 
 /// Embedding generator using a language model
 /// 
@@ -44,7 +43,7 @@ impl EmbeddingGenerator {
     }
     
     /// Generate embedding for a single text
-    pub fn embed(&mut self, text: &str) -> RagResult<Vec<f32>> {
+    pub fn embed(&mut self, _text: &str) -> RagResult<Vec<f32>> {
         // Get the tokenizer from the model
         // This is a simplified implementation - real embedding models
         // have special pooling strategies

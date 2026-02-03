@@ -30,6 +30,7 @@ use std::path::Path;
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct RagConfig {
     /// Database configuration
     #[serde(default)]
@@ -145,15 +146,6 @@ impl Default for SearchConfig {
     }
 }
 
-impl Default for RagConfig {
-    fn default() -> Self {
-        Self {
-            database: DatabaseConfig::default(),
-            embeddings: EmbeddingsConfig::default(),
-            search: SearchConfig::default(),
-        }
-    }
-}
 
 /// Distance metric for vector similarity search
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]

@@ -12,6 +12,7 @@ use std::collections::HashSet;
 
 /// Grammar constraint for token sampling
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub enum Grammar {
     /// JSON output constraint
     Json(JsonGrammar),
@@ -22,14 +23,10 @@ pub enum Grammar {
     /// Choice between multiple strings
     Choice(Vec<String>),
     /// No constraint
+    #[default]
     None,
 }
 
-impl Default for Grammar {
-    fn default() -> Self {
-        Grammar::None
-    }
-}
 
 /// JSON grammar constraint
 #[derive(Debug, Clone)]

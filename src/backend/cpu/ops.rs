@@ -48,7 +48,6 @@ fn add_f32_simd(a: &[f32], b: &[f32], out: &mut [f32]) {
     #[cfg(target_arch = "x86_64")]
     if super::simd::has_avx2() {
         unsafe { add_f32_avx2(a, b, out) };
-        return;
     }
     
     #[cfg(target_arch = "aarch64")]
@@ -141,7 +140,6 @@ fn mul_f32_simd(a: &[f32], b: &[f32], out: &mut [f32]) {
     #[cfg(target_arch = "x86_64")]
     if super::simd::has_avx2() {
         unsafe { mul_f32_avx2(a, b, out) };
-        return;
     }
     
     #[cfg(target_arch = "aarch64")]
@@ -230,7 +228,6 @@ fn scale_f32_simd(a: &[f32], scalar: f32, out: &mut [f32]) {
     #[cfg(target_arch = "x86_64")]
     if super::simd::has_avx2() {
         unsafe { scale_f32_avx2(a, scalar, out) };
-        return;
     }
     
     #[cfg(target_arch = "aarch64")]

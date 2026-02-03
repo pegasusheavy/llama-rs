@@ -74,11 +74,10 @@ impl ModelLoader {
             .map(|v| v as usize)
             .unwrap_or_else(|_| {
                 // Fallback: get vocab size from tokenizer tokens array length
-                if let Some(tokens) = gguf.data.metadata.get("tokenizer.ggml.tokens") {
-                    if let MetadataValue::Array(arr) = tokens {
+                if let Some(tokens) = gguf.data.metadata.get("tokenizer.ggml.tokens")
+                    && let MetadataValue::Array(arr) = tokens {
                         return arr.values.len();
                     }
-                }
                 // Last resort: infer from embedding tensor shape
                 if let Some(emb_info) = gguf.data.get_tensor("token_embd.weight") {
                     // Shape is [hidden_size, vocab_size] in llama.cpp convention

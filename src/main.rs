@@ -806,11 +806,10 @@ fn run_inference(
     // Generation loop
     for _ in 0..n_predict {
         // Check if we hit EOS
-        if let Some(&last) = tokens.last() {
-            if last == tokenizer.special_tokens.eos_token_id {
+        if let Some(&last) = tokens.last()
+            && last == tokenizer.special_tokens.eos_token_id {
                 break;
             }
-        }
 
         // Run forward pass (just the last token for incremental generation)
         let input_tokens = if ctx.position == 0 {
@@ -1781,8 +1780,8 @@ fn run_rag_command(action: RagAction) -> Result<(), Box<dyn std::error::Error>> 
                         let entry = entry?;
                         let file_path = entry.path();
                         
-                        if file_path.is_file() {
-                            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                        if file_path.is_file()
+                            && let Ok(content) = std::fs::read_to_string(&file_path) {
                                 let chunks = chunker.chunk(&content);
                                 
                                 for chunk in chunks {
@@ -1800,7 +1799,6 @@ fn run_rag_command(action: RagAction) -> Result<(), Box<dyn std::error::Error>> 
                                     total_chunks += 1;
                                 }
                             }
-                        }
                     }
                 }
                 

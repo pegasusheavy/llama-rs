@@ -44,8 +44,10 @@ impl Default for RopeConfig {
 
 /// RoPE scaling types for extended context
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum RopeScalingType {
     /// No scaling
+    #[default]
     None,
     /// Linear scaling (divide positions by factor)
     Linear,
@@ -55,11 +57,6 @@ pub enum RopeScalingType {
     DynamicNtk,
 }
 
-impl Default for RopeScalingType {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// Full model configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,12 +193,14 @@ impl ModelConfig {
 
 /// Activation function types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ActivationType {
     /// Gaussian Error Linear Unit
     GELU,
     /// GELU approximation (tanh-based)
     GELUApprox,
     /// Sigmoid Linear Unit (Swish)
+    #[default]
     SiLU,
     /// Rectified Linear Unit
     ReLU,
@@ -209,11 +208,6 @@ pub enum ActivationType {
     ReLUSquared,
 }
 
-impl Default for ActivationType {
-    fn default() -> Self {
-        Self::SiLU
-    }
-}
 
 #[cfg(test)]
 mod tests {

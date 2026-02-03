@@ -227,7 +227,6 @@ pub fn fma_f32(a: &[f32], b: &[f32], c: &[f32], out: &mut [f32]) {
             unsafe {
                 fma_f32_avx2(a, b, c, out);
             }
-            return;
         }
     }
 
@@ -296,7 +295,6 @@ pub fn scale_f32(a: &[f32], scalar: f32, out: &mut [f32]) {
             unsafe {
                 scale_f32_avx2(a, scalar, out);
             }
-            return;
         }
     }
 
@@ -359,7 +357,7 @@ pub fn sum_f32(a: &[f32]) -> f32 {
         if has_avx2() {
             return unsafe { sum_f32_avx2(a) };
         }
-        return a.iter().sum();
+        a.iter().sum()
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -421,7 +419,7 @@ pub fn max_f32(a: &[f32]) -> f32 {
         if has_avx2() {
             return unsafe { max_f32_avx2(a) };
         }
-        return a.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        a.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -514,7 +512,6 @@ pub fn softmax_inplace(x: &mut [f32]) {
             unsafe {
                 softmax_inplace_avx2(x, max_val);
             }
-            return;
         }
     }
 
@@ -612,7 +609,7 @@ pub fn sum_of_squares(x: &[f32]) -> f32 {
         if has_avx2() {
             return unsafe { sum_of_squares_avx2(x) };
         }
-        return x.iter().map(|&v| v * v).sum();
+        x.iter().map(|&v| v * v).sum()
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -683,7 +680,6 @@ pub fn rms_norm(x: &[f32], weight: &[f32], eps: f32, out: &mut [f32]) {
             unsafe {
                 rms_norm_avx2(x, weight, inv_rms, out);
             }
-            return;
         }
     }
 
@@ -756,7 +752,7 @@ pub fn dot_q4_0(weights: &[BlockQ4_0], x: &[f32]) -> f32 {
         if has_avx2() {
             return unsafe { dot_q4_0_avx2(weights, x) };
         }
-        return dot_q4_0_scalar(weights, x);
+        dot_q4_0_scalar(weights, x)
     }
 
     #[cfg(target_arch = "aarch64")]

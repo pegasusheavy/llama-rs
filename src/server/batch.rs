@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, Mutex};
 
 /// Request ID for tracking
 pub type RequestId = u64;
@@ -228,11 +228,10 @@ impl BatchScheduler {
         };
 
         if should_stop {
-            if let Some(seq) = self.sequences.remove(&id) {
-                if let Some(reason) = finish_reason {
+            if let Some(seq) = self.sequences.remove(&id)
+                && let Some(reason) = finish_reason {
                     let _ = seq.token_sender.try_send(GenerationEvent::Finished { reason });
                 }
-            }
             self.promote_pending();
         }
 

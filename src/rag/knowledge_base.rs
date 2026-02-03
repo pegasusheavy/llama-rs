@@ -444,7 +444,7 @@ impl KnowledgeBase {
                 self.ingest_text(&content, &source_id, metadata, &mut result)
                     .await?;
             }
-            DataSource::Url { url, depth } => {
+            DataSource::Url { url, depth: _ } => {
                 result.failures.insert(
                     url,
                     "URL ingestion not yet implemented".into(),
@@ -453,7 +453,7 @@ impl KnowledgeBase {
             DataSource::ObjectStorage {
                 bucket,
                 prefix,
-                endpoint,
+                endpoint: _,
             } => {
                 result.failures.insert(
                     format!("{}:{}", bucket, prefix),
@@ -670,12 +670,10 @@ impl KnowledgeBase {
         let entries = std::fs::read_dir(path)
             .map_err(|e| RagError::ConfigError(format!("Failed to read directory: {}", e)))?;
 
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.is_file() {
-                    files.push(path);
-                }
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                files.push(path);
             }
         }
 
@@ -741,7 +739,7 @@ impl KnowledgeBase {
                 // Semantic chunking: split on sentence boundaries
                 let char_size = max_tokens * 4;
                 let sentences: Vec<&str> = text
-                    .split(|c| c == '.' || c == '!' || c == '?')
+                    .split(['.', '!', '?'])
                     .filter(|s| !s.trim().is_empty())
                     .collect();
 

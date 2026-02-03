@@ -380,7 +380,7 @@ impl HfClient {
                     let file_entry = file_entry?;
                     let file_path = file_entry.path();
 
-                    if file_path.extension().map_or(false, |ext| ext == "gguf") {
+                    if file_path.extension().is_some_and(|ext| ext == "gguf") {
                         cached.push((repo_name.clone(), file_path));
                     }
                 }

@@ -126,7 +126,7 @@ pub fn flash_attention(
 
                 // Process KV in blocks
                 let block_size = BLOCK_SIZE.min(kv_end.max(1));
-                let num_blocks = (kv_end + block_size - 1) / block_size;
+                let num_blocks = kv_end.div_ceil(block_size);
 
                 for block_idx in 0..num_blocks {
                     let block_start = block_idx * block_size;
