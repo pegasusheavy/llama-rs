@@ -14,4 +14,6 @@ pub enum GgufError {
     UnexpectedEof,
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
 }

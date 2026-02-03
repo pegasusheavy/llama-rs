@@ -17,7 +17,7 @@ cpu = []
 cuda = ["dep:cudarc"]
 vulkan = ["dep:ash", "dep:gpu-allocator"]
 metal = ["dep:metal", "dep:objc"]
-server = ["dep:axum", "dep:tokio", "dep:tower-http"]
+server = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:futures"]
 
 [dependencies]
 memmap2 = "0.9"
@@ -29,6 +29,7 @@ tracing = "0.1"
 clap = { version = "4.4", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+rand = "0.8"
 
 cudarc = { version = "0.11", optional = true }
 ash = { version = "0.38", optional = true }
@@ -39,6 +40,7 @@ objc = { version = "0.2", optional = true }
 axum = { version = "0.7", optional = true }
 tokio = { version = "1.35", features = ["full"], optional = true }
 tower-http = { version = "0.5", features = ["cors"], optional = true }
+futures = { version = "0.3", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"

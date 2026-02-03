@@ -1,14 +1,16 @@
-//! GGUF file format parser
+//! GGUF file format parser and writer
 
 mod constants;
 mod error;
 mod reader;
 mod types;
+mod writer;
 
 pub use constants::{GgmlType, GgufMetadataValueType, GGUF_DEFAULT_ALIGNMENT, GGUF_MAGIC};
 pub use error::GgufError;
 pub use reader::GgufReader;
 pub use types::{GgufData, GgufHeader, MetadataArray, MetadataValue, TensorInfo};
+pub use writer::{GgufBuilder, GgufWriter, TensorToWrite};
 
 /// High-level GGUF file handle with memory-mapped tensor data
 pub struct GgufFile {
