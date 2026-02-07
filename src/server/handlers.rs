@@ -12,6 +12,7 @@ use axum::Json;
 use futures::stream::{self, Stream};
 use tokio::sync::Mutex;
 
+use crate::engine::ChatTemplate;
 use crate::model::{InferenceContext, ModelConfig};
 use crate::sampling::{Sampler, SamplerConfig};
 use crate::tokenizer::Tokenizer;
@@ -25,6 +26,8 @@ pub struct AppState {
     pub tokenizer: Arc<Tokenizer>,
     pub config: ModelConfig,
     pub model_name: String,
+    /// Detected chat template for the loaded model
+    pub chat_template: ChatTemplate,
     /// Mutex to serialize inference requests (single-threaded for now)
     pub inference_lock: Mutex<()>,
 }
@@ -71,8 +74,8 @@ pub async fn chat_completions(
 
     let request_id = format!("chatcmpl-{}", created);
 
-    // Format messages into prompt
-    let prompt = format_chat_messages(&request.messages);
+    // Format messages into prompt using the model's chat template
+    let prompt = format_chat_messages(&request.messages, &state.chat_template);
 
     // Create sampler
     let sampler_config = SamplerConfig {
@@ -189,29 +192,44 @@ pub async fn completions(
     }
 }
 
-/// Format chat messages into a prompt string
-fn format_chat_messages(messages: &[ChatMessage]) -> String {
-    let mut prompt = String::new();
+/// Format chat messages into a prompt string using the detected chat template
+fn format_chat_messages(messages: &[ChatMessage], template: &ChatTemplate) -> String {
+    // Extract system prompt and conversation messages
+    let mut system_prompt = String::new();
+    let mut conversation: Vec<&ChatMessage> = Vec::new();
 
-    for (i, msg) in messages.iter().enumerate() {
+    for msg in messages {
         match msg.role {
-            Role::System => {
-                prompt.push_str(&format!(
-                    "[INST] <<SYS>>\n{}\n<</SYS>>\n\n",
-                    msg.content
-                ));
-            }
+            Role::System => system_prompt = msg.content.clone(),
+            _ => conversation.push(msg),
+        }
+    }
+
+    let mut prompt = String::new();
+    let mut is_first_user = true;
+
+    for msg in &conversation {
+        match msg.role {
             Role::User => {
-                if i == 0 || matches!(messages.get(i - 1).map(|m| &m.role), Some(Role::System)) {
-                    prompt.push_str(&format!("{} [/INST]", msg.content));
+                if is_first_user && !system_prompt.is_empty() {
+                    prompt.push_str(&template.format_first_turn(&system_prompt, &msg.content));
+                    is_first_user = false;
                 } else {
-                    prompt.push_str(&format!(" [INST] {} [/INST]", msg.content));
+                    prompt.push_str(&template.format_continuation(&msg.content));
+                    is_first_user = false;
                 }
             }
             Role::Assistant => {
-                prompt.push_str(&format!(" {}", msg.content));
+                // Append assistant response as-is (template handles framing)
+                prompt.push_str(&msg.content);
             }
+            Role::System => {} // Already handled
         }
+    }
+
+    // If there were no user messages but we have a system prompt, wrap it
+    if is_first_user && !system_prompt.is_empty() {
+        prompt.push_str(&template.format_first_turn(&system_prompt, ""));
     }
 
     prompt
@@ -237,12 +255,18 @@ async fn generate_response(
 
     let mut all_tokens = prompt_tokens.clone();
 
-    // Process prompt tokens
-    for (i, &token) in prompt_tokens.iter().enumerate() {
-        if i < state.config.max_seq_len {
-            let _ = state.model.forward(&[token], &mut ctx);
+    // Process prompt tokens (prefill) — process all but the last token
+    // The last token's logits are what we sample from for the first generated token
+    if prompt_tokens.len() > 1 {
+        for (i, &token) in prompt_tokens[..prompt_tokens.len() - 1].iter().enumerate() {
+            if i < state.config.max_seq_len {
+                let _ = state.model.forward(&[token], &mut ctx);
+            }
         }
     }
+
+    // Get stop patterns from the chat template
+    let stop_patterns = state.chat_template.stop_patterns();
 
     // Generate response tokens
     let mut response_text = String::new();
@@ -264,8 +288,18 @@ async fn generate_response(
 
         // Decode token
         if let Ok(text) = state.tokenizer.decode(&[next_token]) {
-            // Check for stop patterns
-            if text.contains("[INST]") || text.contains("</s>") {
+            // Check for stop patterns using the chat template
+            let combined = format!("{}{}", response_text, text);
+            let should_stop = stop_patterns.iter().any(|p| combined.contains(p));
+
+            if should_stop {
+                // Trim stop pattern from response
+                for pattern in stop_patterns {
+                    if let Some(idx) = combined.find(pattern) {
+                        response_text = combined[..idx].to_string();
+                        return Ok((response_text.trim().to_string(), prompt_len, completion_tokens));
+                    }
+                }
                 break;
             }
             response_text.push_str(&text);
@@ -275,7 +309,7 @@ async fn generate_response(
         completion_tokens += 1;
     }
 
-    Ok((response_text, prompt_len, completion_tokens))
+    Ok((response_text.trim().to_string(), prompt_len, completion_tokens))
 }
 
 /// Create streaming response for chat completions

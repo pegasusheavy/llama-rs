@@ -8,6 +8,7 @@ use axum::Router;
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
+use crate::engine::ChatTemplate;
 use crate::gguf::GgufFile;
 use crate::model::ModelLoader;
 use crate::tokenizer::Tokenizer;
@@ -36,6 +37,10 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
     let tokenizer = Tokenizer::from_gguf(&gguf)?;
     eprintln!("Tokenizer loaded: {} tokens", tokenizer.vocab_size);
 
+    // Detect chat template from GGUF metadata
+    let chat_template = ChatTemplate::detect(&gguf);
+    eprintln!("Chat template: {:?}", chat_template);
+
     // Load model
     let loader = ModelLoader::load(&config.model_path)?;
     let model_config = loader.config().clone();
@@ -60,6 +65,7 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
         tokenizer: Arc::new(tokenizer),
         config: model_config,
         model_name,
+        chat_template,
         inference_lock: Mutex::new(()),
     });
 
