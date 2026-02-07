@@ -154,7 +154,6 @@ impl FastGpuInference {
     }
     
     fn process_layer(&mut self, layer_idx: usize, hidden: Vec<f32>) -> BackendResult<Vec<f32>> {
-        let cfg = &self.config;
         let prefix = format!("blk.{}", layer_idx);
         
         // Attention norm

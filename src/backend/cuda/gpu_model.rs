@@ -5,7 +5,7 @@
 
 use cudarc::driver::{CudaDevice, CudaSlice};
 use std::sync::Arc;
-use std::collections::HashMap;
+
 
 use crate::backend::{BackendError, BackendResult};
 use crate::tensor::{DType, Tensor};

@@ -281,7 +281,7 @@ impl GpuOps {
         k_cache: &CudaSlice<f32>,
         v_cache: &CudaSlice<f32>,
         out: &mut CudaSlice<f32>,
-        scores: &mut CudaSlice<f32>,
+        _scores: &mut CudaSlice<f32>,
         head_dim: usize,
         kv_len: usize,
         q_pos: usize,

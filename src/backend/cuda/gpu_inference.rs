@@ -127,7 +127,7 @@ impl GpuInference {
         // Process each layer
         for layer_idx in 0..self.model.num_layers {
             let layer = &self.model.layers[layer_idx];
-            let kv_cache = &mut self.model.kv_caches[layer_idx];
+            let _kv_cache = &mut self.model.kv_caches[layer_idx];
             
             // Attention norm
             self.ops.rms_norm_gpu(
@@ -158,7 +158,7 @@ impl GpuInference {
             // Update KV cache
             // For simplicity, copy K and V to cache at current position
             // This is not the most efficient but works
-            let kv_offset = self.pos * num_kv_heads * head_dim;
+            let _kv_offset = self.pos * num_kv_heads * head_dim;
             // TODO: Implement proper KV cache update kernel
             
             // Compute attention (simplified - would need proper multi-head implementation)
