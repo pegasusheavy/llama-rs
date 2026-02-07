@@ -1,13 +1,16 @@
 //! Debug why token "1" (ID 16) causes attention issues.
 
-use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::backend::Backend;
+use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::gguf::GgufFile;
 use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
 
 fn load_tensor(gguf: &GgufFile, name: &str) -> Tensor {
-    let tensor_info = gguf.data.get_tensor(name).expect(&format!("No tensor: {}", name));
+    let tensor_info = gguf
+        .data
+        .get_tensor(name)
+        .expect(&format!("No tensor: {}", name));
     let tensor_data = gguf.tensor_data(name).expect(&format!("No data: {}", name));
     let shape: Vec<usize> = tensor_info.dims.iter().map(|&d| d as usize).collect();
     let dtype = DType::from(tensor_info.dtype);
@@ -37,7 +40,10 @@ fn rms_norm(x: &[f32], w: &[f32], eps: f32) -> Vec<f32> {
     let sum_sq: f32 = x.iter().map(|v| v * v).sum();
     let rms = (sum_sq / x.len() as f32 + eps).sqrt();
     let inv_rms = 1.0 / rms;
-    x.iter().zip(w.iter()).map(|(v, wt)| v * inv_rms * wt).collect()
+    x.iter()
+        .zip(w.iter())
+        .map(|(v, wt)| v * inv_rms * wt)
+        .collect()
 }
 
 fn vec_mat(x: &[f32], w: &[f32], k: usize, n: usize) -> Vec<f32> {
@@ -108,52 +114,58 @@ fn main() {
     let wq = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_q.weight"));
     let wk = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_k.weight"));
     let wv = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_v.weight"));
-    
+
     let q_bias = try_load_tensor(&gguf, "blk.0.attn_q.bias").map(|t| dequant(&backend, &t));
     let k_bias = try_load_tensor(&gguf, "blk.0.attn_k.bias").map(|t| dequant(&backend, &t));
     let v_bias = try_load_tensor(&gguf, "blk.0.attn_v.bias").map(|t| dequant(&backend, &t));
-    
+
     let emb = dequant(&backend, &load_tensor(&gguf, "token_embd.weight"));
 
-    let tokens = [
-        (16u32, "1"),
-        (10, "+"),
-        (28, "="),
-    ];
+    let tokens = [(16u32, "1"), (10, "+"), (28, "=")];
 
     println!("K/V values at position 0 for different tokens:");
     println!("----------------------------------------------");
-    
+
     for (tok_id, tok_str) in &tokens {
         let emb_vec = &emb[*tok_id as usize * hidden_size..(*tok_id as usize + 1) * hidden_size];
         let normed = rms_norm(emb_vec, &attn_norm_w, eps);
-        
+
         // K/V projections
         let mut k = vec_mat(&normed, &wk, hidden_size, num_kv_heads * head_dim);
         let mut v = vec_mat(&normed, &wv, hidden_size, num_kv_heads * head_dim);
-        
+
         // Apply biases
         if let Some(ref bias) = v_bias {
-            for (vi, bi) in v.iter_mut().zip(bias.iter()) { *vi += *bi; }
+            for (vi, bi) in v.iter_mut().zip(bias.iter()) {
+                *vi += *bi;
+            }
         }
-        
+
         // Apply RoPE at position 0 (identity)
         for kv_head in 0..num_kv_heads {
             let offset = kv_head * head_dim;
             apply_rope(&mut k[offset..offset + head_dim], 0, head_dim, freq_base);
         }
-        
+
         // Apply K bias after RoPE
         if let Some(ref bias) = k_bias {
-            for (ki, bi) in k.iter_mut().zip(bias.iter()) { *ki += *bi; }
+            for (ki, bi) in k.iter_mut().zip(bias.iter()) {
+                *ki += *bi;
+            }
         }
-        
+
         let (k_min, k_max, k_mean) = stats(&k);
         let (v_min, v_max, v_mean) = stats(&v);
-        
+
         println!("Token '{}' (ID {})", tok_str, tok_id);
-        println!("  K: min={:8.4}, max={:8.4}, mean={:8.4}", k_min, k_max, k_mean);
-        println!("  V: min={:8.4}, max={:8.4}, mean={:8.4}", v_min, v_max, v_mean);
+        println!(
+            "  K: min={:8.4}, max={:8.4}, mean={:8.4}",
+            k_min, k_max, k_mean
+        );
+        println!(
+            "  V: min={:8.4}, max={:8.4}, mean={:8.4}",
+            v_min, v_max, v_mean
+        );
         println!("  K first 5 (KV head 0): {:?}", &k[..5]);
         println!("  V first 5 (KV head 0): {:?}", &v[..5]);
         println!();
@@ -164,38 +176,48 @@ fn main() {
     println!();
 
     for (first_tok_id, first_tok_str) in &tokens[..2] {
-        println!("Sequence: '{}=' (tokens [{}, 28])", first_tok_str, first_tok_id);
-        
+        println!(
+            "Sequence: '{}=' (tokens [{}, 28])",
+            first_tok_str, first_tok_id
+        );
+
         // Position 0: compute K, V for first token
-        let emb0 = &emb[*first_tok_id as usize * hidden_size..(*first_tok_id as usize + 1) * hidden_size];
+        let emb0 =
+            &emb[*first_tok_id as usize * hidden_size..(*first_tok_id as usize + 1) * hidden_size];
         let normed0 = rms_norm(emb0, &attn_norm_w, eps);
-        
+
         let mut k0 = vec_mat(&normed0, &wk, hidden_size, num_kv_heads * head_dim);
         let mut v0 = vec_mat(&normed0, &wv, hidden_size, num_kv_heads * head_dim);
-        
+
         if let Some(ref bias) = v_bias {
-            for (vi, bi) in v0.iter_mut().zip(bias.iter()) { *vi += *bi; }
+            for (vi, bi) in v0.iter_mut().zip(bias.iter()) {
+                *vi += *bi;
+            }
         }
         for kv_head in 0..num_kv_heads {
             let offset = kv_head * head_dim;
             apply_rope(&mut k0[offset..offset + head_dim], 0, head_dim, freq_base);
         }
         if let Some(ref bias) = k_bias {
-            for (ki, bi) in k0.iter_mut().zip(bias.iter()) { *ki += *bi; }
+            for (ki, bi) in k0.iter_mut().zip(bias.iter()) {
+                *ki += *bi;
+            }
         }
-        
+
         // Position 1: compute Q, K, V for "="
         let emb1 = &emb[28 * hidden_size..29 * hidden_size];
         let normed1 = rms_norm(emb1, &attn_norm_w, eps);
-        
+
         let mut q1 = vec_mat(&normed1, &wq, hidden_size, num_heads * head_dim);
         let mut k1 = vec_mat(&normed1, &wk, hidden_size, num_kv_heads * head_dim);
         let mut v1 = vec_mat(&normed1, &wv, hidden_size, num_kv_heads * head_dim);
-        
+
         if let Some(ref bias) = v_bias {
-            for (vi, bi) in v1.iter_mut().zip(bias.iter()) { *vi += *bi; }
+            for (vi, bi) in v1.iter_mut().zip(bias.iter()) {
+                *vi += *bi;
+            }
         }
-        
+
         // Apply RoPE at position 1
         for head in 0..num_heads {
             let offset = head * head_dim;
@@ -205,39 +227,56 @@ fn main() {
             let offset = kv_head * head_dim;
             apply_rope(&mut k1[offset..offset + head_dim], 1, head_dim, freq_base);
         }
-        
+
         // Apply Q/K bias after RoPE
         if let Some(ref bias) = q_bias {
-            for (qi, bi) in q1.iter_mut().zip(bias.iter()) { *qi += *bi; }
+            for (qi, bi) in q1.iter_mut().zip(bias.iter()) {
+                *qi += *bi;
+            }
         }
         if let Some(ref bias) = k_bias {
-            for (ki, bi) in k1.iter_mut().zip(bias.iter()) { *ki += *bi; }
+            for (ki, bi) in k1.iter_mut().zip(bias.iter()) {
+                *ki += *bi;
+            }
         }
-        
+
         // Compute attention for head 0 (uses KV head 0)
         let q_head0 = &q1[0..head_dim];
         let k0_head0 = &k0[0..head_dim];
         let k1_head0 = &k1[0..head_dim];
         let v0_head0 = &v0[0..head_dim];
         let v1_head0 = &v1[0..head_dim];
-        
-        let score0: f32 = q_head0.iter().zip(k0_head0.iter()).map(|(a, b)| a * b).sum::<f32>() * scale;
-        let score1: f32 = q_head0.iter().zip(k1_head0.iter()).map(|(a, b)| a * b).sum::<f32>() * scale;
-        
+
+        let score0: f32 = q_head0
+            .iter()
+            .zip(k0_head0.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f32>()
+            * scale;
+        let score1: f32 = q_head0
+            .iter()
+            .zip(k1_head0.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f32>()
+            * scale;
+
         let mut scores = vec![score0, score1];
         println!("  Head 0 scores: [{:.4}, {:.4}]", score0, score1);
-        
+
         softmax(&mut scores);
         println!("  Head 0 weights: [{:.4}, {:.4}]", scores[0], scores[1]);
-        
+
         // Weighted sum of V
         let mut attn_out: Vec<f32> = vec![0.0; head_dim];
         for d in 0..head_dim {
             attn_out[d] = scores[0] * v0_head0[d] + scores[1] * v1_head0[d];
         }
-        
+
         let (out_min, out_max, out_mean) = stats(&attn_out);
-        println!("  Head 0 output: min={:.4}, max={:.4}, mean={:.4}", out_min, out_max, out_mean);
+        println!(
+            "  Head 0 output: min={:.4}, max={:.4}, mean={:.4}",
+            out_min, out_max, out_mean
+        );
         println!("  Output first 5: {:?}", &attn_out[..5]);
         println!();
     }

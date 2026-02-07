@@ -1,7 +1,7 @@
 //! Compare attention patterns between positions.
 
-use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::backend::Backend;
+use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::gguf::GgufFile;
 use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
@@ -34,7 +34,10 @@ fn rms_norm(x: &[f32], w: &[f32], eps: f32) -> Vec<f32> {
     let sum_sq: f32 = x.iter().map(|v| v * v).sum();
     let rms = (sum_sq / x.len() as f32 + eps).sqrt();
     let inv_rms = 1.0 / rms;
-    x.iter().zip(w.iter()).map(|(v, wt)| v * inv_rms * wt).collect()
+    x.iter()
+        .zip(w.iter())
+        .map(|(v, wt)| v * inv_rms * wt)
+        .collect()
 }
 
 fn vec_mat(x: &[f32], w: &[f32], k: usize, n: usize) -> Vec<f32> {
@@ -87,130 +90,166 @@ fn main() {
     let eps = 1e-6f32;
     let freq_base = 1000000.0f32;
     let scale = 1.0 / (head_dim as f32).sqrt();
-    let queries_per_kv = num_heads / num_kv_heads;  // 7
+    let queries_per_kv = num_heads / num_kv_heads; // 7
 
     println!("=== Attention Pattern Analysis ===");
     println!();
     println!("Configuration:");
-    println!("  num_heads = {}, num_kv_heads = {}", num_heads, num_kv_heads);
-    println!("  queries_per_kv = {} (heads 0-6 use KV head 0, heads 7-13 use KV head 1)", queries_per_kv);
+    println!(
+        "  num_heads = {}, num_kv_heads = {}",
+        num_heads, num_kv_heads
+    );
+    println!(
+        "  queries_per_kv = {} (heads 0-6 use KV head 0, heads 7-13 use KV head 1)",
+        queries_per_kv
+    );
     println!("  scale = 1/sqrt({}) = {:.6}", head_dim, scale);
     println!();
-    
+
     // Load layer 0 weights
     let emb = dequant(&backend, &load_tensor(&gguf, "token_embd.weight"));
     let attn_norm_w = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_norm.weight"));
     let wq = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_q.weight"));
     let wk = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_k.weight"));
     let wv = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_v.weight"));
-    
+
     let q_bias = try_load_tensor(&gguf, "blk.0.attn_q.bias").map(|t| dequant(&backend, &t));
     let k_bias = try_load_tensor(&gguf, "blk.0.attn_k.bias").map(|t| dequant(&backend, &t));
     let v_bias = try_load_tensor(&gguf, "blk.0.attn_v.bias").map(|t| dequant(&backend, &t));
 
     // Process "1+1=" [16, 10, 16, 28]
     let tokens: Vec<u32> = vec![16, 10, 16, 28];
-    
+
     // Compute K/V for each position (Layer 0 only)
     let mut k_cache: Vec<Vec<f32>> = vec![]; // [pos][kv_head * head_dim]
     let mut v_cache: Vec<Vec<f32>> = vec![];
-    
+
     println!("Layer 0 K/V computation for each position:");
     println!("-----------------------------------------");
-    
+
     for (pos, &token) in tokens.iter().enumerate() {
         let emb_vec = &emb[token as usize * hidden_size..(token as usize + 1) * hidden_size];
         let normed = rms_norm(emb_vec, &attn_norm_w, eps);
-        
+
         let mut k = vec_mat(&normed, &wk, hidden_size, num_kv_heads * head_dim);
         let mut v = vec_mat(&normed, &wv, hidden_size, num_kv_heads * head_dim);
-        
+
         if let Some(ref bias) = v_bias {
-            for (vi, bi) in v.iter_mut().zip(bias.iter()) { *vi += *bi; }
+            for (vi, bi) in v.iter_mut().zip(bias.iter()) {
+                *vi += *bi;
+            }
         }
-        
+
         // RoPE for K at this position
         for kv_head in 0..num_kv_heads {
-            apply_rope(&mut k[kv_head * head_dim..(kv_head + 1) * head_dim], pos, head_dim, freq_base);
+            apply_rope(
+                &mut k[kv_head * head_dim..(kv_head + 1) * head_dim],
+                pos,
+                head_dim,
+                freq_base,
+            );
         }
-        
+
         if let Some(ref bias) = k_bias {
-            for (ki, bi) in k.iter_mut().zip(bias.iter()) { *ki += *bi; }
+            for (ki, bi) in k.iter_mut().zip(bias.iter()) {
+                *ki += *bi;
+            }
         }
-        
-        println!("Position {} (token {}): K[0..5]={:.3?}", pos, token, &k[..5]);
-        
+
+        println!(
+            "Position {} (token {}): K[0..5]={:.3?}",
+            pos,
+            token,
+            &k[..5]
+        );
+
         k_cache.push(k);
         v_cache.push(v);
     }
-    
+
     println!();
-    
+
     // Now compute Q for the last position and show attention patterns
     let last_pos = tokens.len() - 1;
     let last_token = tokens[last_pos];
-    
+
     let emb_vec = &emb[last_token as usize * hidden_size..(last_token as usize + 1) * hidden_size];
     let normed = rms_norm(emb_vec, &attn_norm_w, eps);
-    
+
     let mut q = vec_mat(&normed, &wq, hidden_size, num_heads * head_dim);
-    
+
     // RoPE for Q at position 3
     for head in 0..num_heads {
-        apply_rope(&mut q[head * head_dim..(head + 1) * head_dim], last_pos, head_dim, freq_base);
+        apply_rope(
+            &mut q[head * head_dim..(head + 1) * head_dim],
+            last_pos,
+            head_dim,
+            freq_base,
+        );
     }
-    
+
     if let Some(ref bias) = q_bias {
-        for (qi, bi) in q.iter_mut().zip(bias.iter()) { *qi += *bi; }
+        for (qi, bi) in q.iter_mut().zip(bias.iter()) {
+            *qi += *bi;
+        }
     }
-    
+
     println!("Q at position {} (token {}):", last_pos, last_token);
     println!("  Q head 0 [0..5] = {:.3?}", &q[..5]);
-    println!("  Q head 7 [0..5] = {:.3?}", &q[7*head_dim..7*head_dim+5]);
+    println!(
+        "  Q head 7 [0..5] = {:.3?}",
+        &q[7 * head_dim..7 * head_dim + 5]
+    );
     println!();
-    
+
     // Compute attention scores for head 0 (uses KV head 0)
     println!("Attention scores for head 0 (uses KV head 0):");
     println!("---------------------------------------------");
-    
+
     let q_head0 = &q[0..head_dim];
     let mut scores = vec![];
-    
+
     for kv_pos in 0..tokens.len() {
-        let k_vec = &k_cache[kv_pos][0..head_dim];  // KV head 0
+        let k_vec = &k_cache[kv_pos][0..head_dim]; // KV head 0
         let dot: f32 = q_head0.iter().zip(k_vec.iter()).map(|(a, b)| a * b).sum();
         let scaled = dot * scale;
         scores.push(scaled);
-        println!("  Score[{}] (token {}) = {:.2} * {:.4} = {:.4}", kv_pos, tokens[kv_pos], dot, scale, scaled);
+        println!(
+            "  Score[{}] (token {}) = {:.2} * {:.4} = {:.4}",
+            kv_pos, tokens[kv_pos], dot, scale, scaled
+        );
     }
-    
+
     let mut weights = scores.clone();
     softmax(&mut weights);
     println!();
     println!("  Softmax weights: {:?}", weights);
     println!();
-    
+
     // Compute attention scores for head 7 (uses KV head 1)
     println!("Attention scores for head 7 (uses KV head 1):");
     println!("---------------------------------------------");
-    
-    let q_head7 = &q[7*head_dim..8*head_dim];
+
+    let q_head7 = &q[7 * head_dim..8 * head_dim];
     let mut scores7 = vec![];
-    
+
     for kv_pos in 0..tokens.len() {
-        let k_vec = &k_cache[kv_pos][head_dim..2*head_dim];  // KV head 1
+        let k_vec = &k_cache[kv_pos][head_dim..2 * head_dim]; // KV head 1
         let dot: f32 = q_head7.iter().zip(k_vec.iter()).map(|(a, b)| a * b).sum();
         let scaled = dot * scale;
         scores7.push(scaled);
-        println!("  Score[{}] (token {}) = {:.2} * {:.4} = {:.4}", kv_pos, tokens[kv_pos], dot, scale, scaled);
+        println!(
+            "  Score[{}] (token {}) = {:.2} * {:.4} = {:.4}",
+            kv_pos, tokens[kv_pos], dot, scale, scaled
+        );
     }
-    
+
     let mut weights7 = scores7.clone();
     softmax(&mut weights7);
     println!();
     println!("  Softmax weights: {:?}", weights7);
     println!();
-    
+
     // Analysis
     println!("=== Analysis ===");
     println!();
@@ -220,10 +259,17 @@ fn main() {
     println!("3. Output an embedding similar to token '2'");
     println!();
     println!("Head 0 attention pattern: {:?}", weights);
-    println!("  This head attends mostly to position {} (weight {:.2}%)", 
-        weights.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap().0,
-        weights.iter().cloned().fold(0.0f32, f32::max) * 100.0);
-    
+    println!(
+        "  This head attends mostly to position {} (weight {:.2}%)",
+        weights
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap()
+            .0,
+        weights.iter().cloned().fold(0.0f32, f32::max) * 100.0
+    );
+
     println!();
     println!("If the attention is dominated by large biases, the model may not");
     println!("be able to properly distinguish between different inputs.");

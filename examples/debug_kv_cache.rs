@@ -1,7 +1,7 @@
 //! Debug KV cache to see if attention across positions is working
 
-use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::backend::Backend;
+use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::gguf::GgufFile;
 use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
@@ -34,7 +34,10 @@ fn rms_norm(x: &[f32], w: &[f32], eps: f32) -> Vec<f32> {
     let sum_sq: f32 = x.iter().map(|v| v * v).sum();
     let rms = (sum_sq / x.len() as f32 + eps).sqrt();
     let inv_rms = 1.0 / rms;
-    x.iter().zip(w.iter()).map(|(v, wt)| v * inv_rms * wt).collect()
+    x.iter()
+        .zip(w.iter())
+        .map(|(v, wt)| v * inv_rms * wt)
+        .collect()
 }
 
 fn vec_mat(x: &[f32], w: &[f32], k: usize, n: usize) -> Vec<f32> {
@@ -74,13 +77,13 @@ fn softmax(scores: &mut [f32]) {
 
 fn main() {
     let model_path = "/home/joseph/Models/qwen2.5-0.5b-instruct-q4_k_m.gguf";
-    
+
     eprintln!("Loading model...");
     let gguf = GgufFile::open(Path::new(model_path)).expect("Failed to open GGUF");
     let backend = CpuBackend::new();
-    
+
     let emb = dequant(&backend, &load_tensor(&gguf, "token_embd.weight"));
-    
+
     let hidden_size = 896;
     let num_heads = 14;
     let head_dim = 64;
@@ -89,64 +92,80 @@ fn main() {
     let eps = 1e-6f32;
     let freq_base = 1000000.0f32;
     let scale = 1.0 / (head_dim as f32).sqrt();
-    
+
     // Load layer 0 weights
     let attn_norm_w = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_norm.weight"));
     let wq = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_q.weight"));
     let wk = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_k.weight"));
     let wv = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_v.weight"));
     let wo = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_output.weight"));
-    
+
     let q_bias = try_load_tensor(&gguf, "blk.0.attn_q.bias").map(|t| dequant(&backend, &t));
     let k_bias = try_load_tensor(&gguf, "blk.0.attn_k.bias").map(|t| dequant(&backend, &t));
     let v_bias = try_load_tensor(&gguf, "blk.0.attn_v.bias").map(|t| dequant(&backend, &t));
-    
+
     // Process "1+1=" = [16, 10, 16, 28]
     let tokens = [16u32, 10, 16, 28];
     println!("=== Processing tokens {:?} ===\n", tokens);
-    
+
     // Store KV cache for all positions
-    let mut k_cache: Vec<Vec<f32>> = Vec::new();  // [num_kv_heads * head_dim] per position
+    let mut k_cache: Vec<Vec<f32>> = Vec::new(); // [num_kv_heads * head_dim] per position
     let mut v_cache: Vec<Vec<f32>> = Vec::new();
-    
+
     // Process each position
     for (pos, &token) in tokens.iter().enumerate() {
         let hidden = emb[token as usize * hidden_size..(token as usize + 1) * hidden_size].to_vec();
         let normed = rms_norm(&hidden, &attn_norm_w, eps);
-        
+
         // Q, K, V projections with bias BEFORE RoPE
         let mut q = vec_mat(&normed, &wq, hidden_size, num_heads * head_dim);
         let mut k = vec_mat(&normed, &wk, hidden_size, num_kv_heads * head_dim);
         let mut v = vec_mat(&normed, &wv, hidden_size, num_kv_heads * head_dim);
-        
+
         if let Some(ref bias) = q_bias {
-            for (qi, bi) in q.iter_mut().zip(bias.iter()) { *qi += *bi; }
+            for (qi, bi) in q.iter_mut().zip(bias.iter()) {
+                *qi += *bi;
+            }
         }
         if let Some(ref bias) = k_bias {
-            for (ki, bi) in k.iter_mut().zip(bias.iter()) { *ki += *bi; }
+            for (ki, bi) in k.iter_mut().zip(bias.iter()) {
+                *ki += *bi;
+            }
         }
         if let Some(ref bias) = v_bias {
-            for (vi, bi) in v.iter_mut().zip(bias.iter()) { *vi += *bi; }
+            for (vi, bi) in v.iter_mut().zip(bias.iter()) {
+                *vi += *bi;
+            }
         }
-        
+
         // Apply RoPE (NeoX style)
         for head in 0..num_heads {
-            apply_rope_neox(&mut q[head * head_dim..(head + 1) * head_dim], pos, head_dim, freq_base);
+            apply_rope_neox(
+                &mut q[head * head_dim..(head + 1) * head_dim],
+                pos,
+                head_dim,
+                freq_base,
+            );
         }
         for kv_head in 0..num_kv_heads {
-            apply_rope_neox(&mut k[kv_head * head_dim..(kv_head + 1) * head_dim], pos, head_dim, freq_base);
+            apply_rope_neox(
+                &mut k[kv_head * head_dim..(kv_head + 1) * head_dim],
+                pos,
+                head_dim,
+                freq_base,
+            );
         }
-        
+
         // Store in cache
         k_cache.push(k.clone());
         v_cache.push(v.clone());
-        
+
         // Compute attention for head 0
         println!("=== Position {} (token {}) ===", pos, token);
-        
-        let kv_head = 0;  // head 0 uses kv_head 0 (since 14/7 = 2)
+
+        let kv_head = 0; // head 0 uses kv_head 0 (since 14/7 = 2)
         let q_head = &q[0..head_dim];
-        
+
         // Compute scores against all cached K
         println!("Attention scores (head 0):");
         let mut scores = Vec::new();
@@ -157,11 +176,17 @@ fn main() {
             scores.push(score);
             println!("  pos {} score: {:.4}", kv_pos, score);
         }
-        
+
         // Softmax
         softmax(&mut scores);
-        println!("Softmax weights: {:?}", scores.iter().map(|s| format!("{:.3}", s)).collect::<Vec<_>>());
-        
+        println!(
+            "Softmax weights: {:?}",
+            scores
+                .iter()
+                .map(|s| format!("{:.3}", s))
+                .collect::<Vec<_>>()
+        );
+
         // Weighted V
         let mut attn_out = vec![0.0f32; head_dim];
         for kv_pos in 0..=pos {
@@ -173,7 +198,7 @@ fn main() {
         println!("Attention output sum: {:.4}", attn_out.iter().sum::<f32>());
         println!();
     }
-    
+
     println!("=== Key observations ===");
     println!("At position 3 (after '='), the attention should weight the '1+1' context");
     println!("to predict '2'. If attention weights are wrong, the prediction will fail.");

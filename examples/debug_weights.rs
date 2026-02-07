@@ -8,12 +8,12 @@ fn main() {
         eprintln!("Usage: {} <model.gguf>", args[0]);
         std::process::exit(1);
     }
-    
+
     let model_path = &args[1];
-    
+
     println!("Loading GGUF from: {}", model_path);
     let gguf = GgufFile::open(model_path).expect("Failed to open GGUF");
-    
+
     println!("\nTensor names in GGUF:");
     for tensor in &gguf.data.tensors {
         println!("  {} - {:?} {:?}", tensor.name, tensor.dims, tensor.dtype);

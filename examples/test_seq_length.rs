@@ -1,13 +1,16 @@
 //! Test how the error scales with sequence length.
 
-use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::backend::Backend;
+use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::gguf::GgufFile;
 use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
 
 fn load_tensor(gguf: &GgufFile, name: &str) -> Tensor {
-    let tensor_info = gguf.data.get_tensor(name).expect(&format!("No tensor: {}", name));
+    let tensor_info = gguf
+        .data
+        .get_tensor(name)
+        .expect(&format!("No tensor: {}", name));
     let tensor_data = gguf.tensor_data(name).expect(&format!("No data: {}", name));
     let shape: Vec<usize> = tensor_info.dims.iter().map(|&d| d as usize).collect();
     let dtype = DType::from(tensor_info.dtype);
@@ -37,7 +40,10 @@ fn rms_norm(x: &[f32], w: &[f32], eps: f32) -> Vec<f32> {
     let sum_sq: f32 = x.iter().map(|v| v * v).sum();
     let rms = (sum_sq / x.len() as f32 + eps).sqrt();
     let inv_rms = 1.0 / rms;
-    x.iter().zip(w.iter()).map(|(v, wt)| v * inv_rms * wt).collect()
+    x.iter()
+        .zip(w.iter())
+        .map(|(v, wt)| v * inv_rms * wt)
+        .collect()
 }
 
 fn vec_mat(x: &[f32], w: &[f32], k: usize, n: usize) -> Vec<f32> {
@@ -101,46 +107,77 @@ fn run_inference(gguf: &GgufFile, backend: &CpuBackend, tokens: &[u32]) -> (f32,
     let output_norm_w = dequant(backend, &load_tensor(gguf, "output_norm.weight"));
     let output_w = dequant(backend, &load_tensor(gguf, "output.weight"));
 
-    let mut k_caches: Vec<Vec<Vec<Vec<f32>>>> = vec![
-        vec![vec![vec![0.0; head_dim]; max_seq_len]; num_kv_heads];
-        num_layers
-    ];
-    let mut v_caches: Vec<Vec<Vec<Vec<f32>>>> = vec![
-        vec![vec![vec![0.0; head_dim]; max_seq_len]; num_kv_heads];
-        num_layers
-    ];
+    let mut k_caches: Vec<Vec<Vec<Vec<f32>>>> =
+        vec![vec![vec![vec![0.0; head_dim]; max_seq_len]; num_kv_heads]; num_layers];
+    let mut v_caches: Vec<Vec<Vec<Vec<f32>>>> =
+        vec![vec![vec![vec![0.0; head_dim]; max_seq_len]; num_kv_heads]; num_layers];
 
-    let mut hidden_states: Vec<Vec<f32>> = tokens.iter()
+    let mut hidden_states: Vec<Vec<f32>> = tokens
+        .iter()
         .map(|&tok| emb[tok as usize * hidden_size..(tok as usize + 1) * hidden_size].to_vec())
         .collect();
 
     for pos in 0..tokens.len() {
         for layer_idx in 0..num_layers {
             let prefix = format!("blk.{}", layer_idx);
-            
-            let attn_norm_w = dequant(backend, &load_tensor(gguf, &format!("{}.attn_norm.weight", prefix)));
-            let wq = dequant(backend, &load_tensor(gguf, &format!("{}.attn_q.weight", prefix)));
-            let wk = dequant(backend, &load_tensor(gguf, &format!("{}.attn_k.weight", prefix)));
-            let wv = dequant(backend, &load_tensor(gguf, &format!("{}.attn_v.weight", prefix)));
-            let wo = dequant(backend, &load_tensor(gguf, &format!("{}.attn_output.weight", prefix)));
-            
-            let q_bias = try_load_tensor(gguf, &format!("{}.attn_q.bias", prefix)).map(|t| dequant(backend, &t));
-            let k_bias = try_load_tensor(gguf, &format!("{}.attn_k.bias", prefix)).map(|t| dequant(backend, &t));
-            let v_bias = try_load_tensor(gguf, &format!("{}.attn_v.bias", prefix)).map(|t| dequant(backend, &t));
 
-            let ffn_norm_w = dequant(backend, &load_tensor(gguf, &format!("{}.ffn_norm.weight", prefix)));
-            let w_gate = dequant(backend, &load_tensor(gguf, &format!("{}.ffn_gate.weight", prefix)));
-            let w_up = dequant(backend, &load_tensor(gguf, &format!("{}.ffn_up.weight", prefix)));
-            let w_down = dequant(backend, &load_tensor(gguf, &format!("{}.ffn_down.weight", prefix)));
+            let attn_norm_w = dequant(
+                backend,
+                &load_tensor(gguf, &format!("{}.attn_norm.weight", prefix)),
+            );
+            let wq = dequant(
+                backend,
+                &load_tensor(gguf, &format!("{}.attn_q.weight", prefix)),
+            );
+            let wk = dequant(
+                backend,
+                &load_tensor(gguf, &format!("{}.attn_k.weight", prefix)),
+            );
+            let wv = dequant(
+                backend,
+                &load_tensor(gguf, &format!("{}.attn_v.weight", prefix)),
+            );
+            let wo = dequant(
+                backend,
+                &load_tensor(gguf, &format!("{}.attn_output.weight", prefix)),
+            );
+
+            let q_bias = try_load_tensor(gguf, &format!("{}.attn_q.bias", prefix))
+                .map(|t| dequant(backend, &t));
+            let k_bias = try_load_tensor(gguf, &format!("{}.attn_k.bias", prefix))
+                .map(|t| dequant(backend, &t));
+            let v_bias = try_load_tensor(gguf, &format!("{}.attn_v.bias", prefix))
+                .map(|t| dequant(backend, &t));
+
+            let ffn_norm_w = dequant(
+                backend,
+                &load_tensor(gguf, &format!("{}.ffn_norm.weight", prefix)),
+            );
+            let w_gate = dequant(
+                backend,
+                &load_tensor(gguf, &format!("{}.ffn_gate.weight", prefix)),
+            );
+            let w_up = dequant(
+                backend,
+                &load_tensor(gguf, &format!("{}.ffn_up.weight", prefix)),
+            );
+            let w_down = dequant(
+                backend,
+                &load_tensor(gguf, &format!("{}.ffn_down.weight", prefix)),
+            );
 
             let h = &hidden_states[pos];
             let normed = rms_norm(h, &attn_norm_w, eps);
-            
+
             let mut q = vec_mat(&normed, &wq, hidden_size, num_heads * head_dim);
             let mut k = vec_mat(&normed, &wk, hidden_size, num_kv_heads * head_dim);
             let mut v = vec_mat(&normed, &wv, hidden_size, num_kv_heads * head_dim);
-            
-            if let Some(ref bias) = v_bias { for (vi, bi) in v.iter_mut().zip(bias.iter()) { *vi += *bi; } }
+
+            if let Some(ref bias) = v_bias {
+                for (vi, bi) in v.iter_mut().zip(bias.iter()) {
+                    *vi += *bi;
+                }
+            }
 
             for head in 0..num_heads {
                 let offset = head * head_dim;
@@ -151,8 +188,16 @@ fn run_inference(gguf: &GgufFile, backend: &CpuBackend, tokens: &[u32]) -> (f32,
                 apply_rope(&mut k[offset..offset + head_dim], pos, head_dim, freq_base);
             }
 
-            if let Some(ref bias) = q_bias { for (qi, bi) in q.iter_mut().zip(bias.iter()) { *qi += *bi; } }
-            if let Some(ref bias) = k_bias { for (ki, bi) in k.iter_mut().zip(bias.iter()) { *ki += *bi; } }
+            if let Some(ref bias) = q_bias {
+                for (qi, bi) in q.iter_mut().zip(bias.iter()) {
+                    *qi += *bi;
+                }
+            }
+            if let Some(ref bias) = k_bias {
+                for (ki, bi) in k.iter_mut().zip(bias.iter()) {
+                    *ki += *bi;
+                }
+            }
 
             for kv_head in 0..num_kv_heads {
                 let offset = kv_head * head_dim;
@@ -167,7 +212,7 @@ fn run_inference(gguf: &GgufFile, backend: &CpuBackend, tokens: &[u32]) -> (f32,
             for head in 0..num_heads {
                 let kv_head = head / queries_per_kv;
                 let q_vec = &q[head * head_dim..(head + 1) * head_dim];
-                
+
                 let mut scores = vec![0.0f32; kv_len];
                 for kv_pos in 0..kv_len {
                     let k_vec = &k_caches[layer_idx][kv_head][kv_pos];
@@ -184,15 +229,24 @@ fn run_inference(gguf: &GgufFile, backend: &CpuBackend, tokens: &[u32]) -> (f32,
             }
 
             let attn_proj = vec_mat(&attn_out, &wo, num_heads * head_dim, hidden_size);
-            let mut h_after_attn: Vec<f32> = h.iter().zip(attn_proj.iter()).map(|(a, b)| a + b).collect();
+            let mut h_after_attn: Vec<f32> =
+                h.iter().zip(attn_proj.iter()).map(|(a, b)| a + b).collect();
 
             let ffn_normed = rms_norm(&h_after_attn, &ffn_norm_w, eps);
             let gate = vec_mat(&ffn_normed, &w_gate, hidden_size, intermediate_size);
             let up = vec_mat(&ffn_normed, &w_up, hidden_size, intermediate_size);
-            let intermediate: Vec<f32> = gate.iter().zip(up.iter()).map(|(g, u)| silu(*g) * u).collect();
+            let intermediate: Vec<f32> = gate
+                .iter()
+                .zip(up.iter())
+                .map(|(g, u)| silu(*g) * u)
+                .collect();
             let ffn_out = vec_mat(&intermediate, &w_down, intermediate_size, hidden_size);
 
-            let h_final: Vec<f32> = h_after_attn.iter().zip(ffn_out.iter()).map(|(a, b)| a + b).collect();
+            let h_final: Vec<f32> = h_after_attn
+                .iter()
+                .zip(ffn_out.iter())
+                .map(|(a, b)| a + b)
+                .collect();
             hidden_states[pos] = h_final;
         }
     }
@@ -221,20 +275,22 @@ fn main() {
 
     // Test different prefixes before "=" to see if error accumulates
     let tests: Vec<(Vec<u32>, &str)> = vec![
-        (vec![28], "="),                           // Just "="
-        (vec![16, 28], "1="),                      // "1="
-        (vec![16, 10, 28], "1+="),                 // "1+="
-        (vec![16, 10, 16, 28], "1+1="),            // "1+1="
-        (vec![16, 10, 16, 10, 16, 28], "1+1+1="),  // "1+1+1="
+        (vec![28], "="),                          // Just "="
+        (vec![16, 28], "1="),                     // "1="
+        (vec![16, 10, 28], "1+="),                // "1+="
+        (vec![16, 10, 16, 28], "1+1="),           // "1+1="
+        (vec![16, 10, 16, 10, 16, 28], "1+1+1="), // "1+1+1="
     ];
 
     for (tokens, desc) in tests {
         let (logit, rank) = run_inference(&gguf, &backend, &tokens);
-        println!("{:23} | {:>7} | {:>14.4} | {:>5}", 
-            format!("{:?} ({})", tokens, desc), 
-            tokens.len(), 
-            logit, 
-            rank);
+        println!(
+            "{:23} | {:>7} | {:>14.4} | {:>5}",
+            format!("{:?} ({})", tokens, desc),
+            tokens.len(),
+            logit,
+            rank
+        );
     }
 
     println!();

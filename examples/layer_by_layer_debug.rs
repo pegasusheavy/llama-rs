@@ -8,8 +8,8 @@
 //!
 //! Output can be compared with the Python reference implementation.
 
-use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::backend::Backend;
+use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::gguf::GgufFile;
 use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
@@ -146,8 +146,10 @@ fn main() {
     println!("=== Layer-by-Layer Debug ===");
     println!("Model: Qwen2.5-0.5B-Instruct");
     println!("Tokens: {:?} (seq_len={})", tokens, seq_len);
-    println!("Config: hidden={}, heads={}, kv_heads={}, head_dim={}", 
-        hidden_size, num_heads, num_kv_heads, head_dim);
+    println!(
+        "Config: hidden={}, heads={}, kv_heads={}, head_dim={}",
+        hidden_size, num_heads, num_kv_heads, head_dim
+    );
     println!();
 
     // Load embeddings
@@ -159,14 +161,10 @@ fn main() {
     let mut hidden_states: Vec<Vec<f32>> = Vec::new();
 
     // KV cache: [layer][kv_head][pos][head_dim]
-    let mut k_cache: Vec<Vec<Vec<Vec<f32>>>> = vec![
-        vec![vec![vec![0.0; head_dim]; seq_len]; num_kv_heads]; 
-        num_layers
-    ];
-    let mut v_cache: Vec<Vec<Vec<Vec<f32>>>> = vec![
-        vec![vec![vec![0.0; head_dim]; seq_len]; num_kv_heads]; 
-        num_layers
-    ];
+    let mut k_cache: Vec<Vec<Vec<Vec<f32>>>> =
+        vec![vec![vec![vec![0.0; head_dim]; seq_len]; num_kv_heads]; num_layers];
+    let mut v_cache: Vec<Vec<Vec<Vec<f32>>>> =
+        vec![vec![vec![vec![0.0; head_dim]; seq_len]; num_kv_heads]; num_layers];
 
     // Get embeddings for all tokens
     for &token in &tokens {
@@ -177,15 +175,24 @@ fn main() {
     println!("--- Embeddings ---");
     for (pos, h) in hidden_states.iter().enumerate() {
         let (min, max, mean) = tensor_stats(h);
-        println!("Pos {}: min={:.6}, max={:.6}, mean={:.6}, first5={:?}", 
-            pos, min, max, mean, &h[..5]);
+        println!(
+            "Pos {}: min={:.6}, max={:.6}, mean={:.6}, first5={:?}",
+            pos,
+            min,
+            max,
+            mean,
+            &h[..5]
+        );
     }
     println!();
 
     // Process tokens one at a time (causal)
     for pos in 0..seq_len {
-        println!("=== Processing Position {} (token {}) ===", pos, tokens[pos]);
-        
+        println!(
+            "=== Processing Position {} (token {}) ===",
+            pos, tokens[pos]
+        );
+
         let mut h = hidden_states[pos].clone();
 
         // Process each layer
@@ -193,11 +200,26 @@ fn main() {
             let prefix = format!("blk.{}", layer_idx);
 
             // Load layer weights
-            let attn_norm_w = dequant(&backend, &load_tensor(&gguf, &format!("{}.attn_norm.weight", prefix)));
-            let wq = dequant(&backend, &load_tensor(&gguf, &format!("{}.attn_q.weight", prefix)));
-            let wk = dequant(&backend, &load_tensor(&gguf, &format!("{}.attn_k.weight", prefix)));
-            let wv = dequant(&backend, &load_tensor(&gguf, &format!("{}.attn_v.weight", prefix)));
-            let wo = dequant(&backend, &load_tensor(&gguf, &format!("{}.attn_output.weight", prefix)));
+            let attn_norm_w = dequant(
+                &backend,
+                &load_tensor(&gguf, &format!("{}.attn_norm.weight", prefix)),
+            );
+            let wq = dequant(
+                &backend,
+                &load_tensor(&gguf, &format!("{}.attn_q.weight", prefix)),
+            );
+            let wk = dequant(
+                &backend,
+                &load_tensor(&gguf, &format!("{}.attn_k.weight", prefix)),
+            );
+            let wv = dequant(
+                &backend,
+                &load_tensor(&gguf, &format!("{}.attn_v.weight", prefix)),
+            );
+            let wo = dequant(
+                &backend,
+                &load_tensor(&gguf, &format!("{}.attn_output.weight", prefix)),
+            );
 
             let q_bias = try_load_tensor(&gguf, &format!("{}.attn_q.bias", prefix))
                 .map(|t| dequant(&backend, &t));
@@ -206,10 +228,22 @@ fn main() {
             let v_bias = try_load_tensor(&gguf, &format!("{}.attn_v.bias", prefix))
                 .map(|t| dequant(&backend, &t));
 
-            let ffn_norm_w = dequant(&backend, &load_tensor(&gguf, &format!("{}.ffn_norm.weight", prefix)));
-            let w_gate = dequant(&backend, &load_tensor(&gguf, &format!("{}.ffn_gate.weight", prefix)));
-            let w_up = dequant(&backend, &load_tensor(&gguf, &format!("{}.ffn_up.weight", prefix)));
-            let w_down = dequant(&backend, &load_tensor(&gguf, &format!("{}.ffn_down.weight", prefix)));
+            let ffn_norm_w = dequant(
+                &backend,
+                &load_tensor(&gguf, &format!("{}.ffn_norm.weight", prefix)),
+            );
+            let w_gate = dequant(
+                &backend,
+                &load_tensor(&gguf, &format!("{}.ffn_gate.weight", prefix)),
+            );
+            let w_up = dequant(
+                &backend,
+                &load_tensor(&gguf, &format!("{}.ffn_up.weight", prefix)),
+            );
+            let w_down = dequant(
+                &backend,
+                &load_tensor(&gguf, &format!("{}.ffn_down.weight", prefix)),
+            );
 
             // ===== Attention =====
             // 1. RMSNorm
@@ -297,7 +331,9 @@ fn main() {
             let up = vec_mat(&ffn_normed, &w_up, hidden_size, intermediate_size);
 
             // 3. SiLU(gate) * up
-            let mut intermediate: Vec<f32> = gate.iter().zip(up.iter())
+            let mut intermediate: Vec<f32> = gate
+                .iter()
+                .zip(up.iter())
                 .map(|(g, u)| silu(*g) * u)
                 .collect();
 
@@ -312,9 +348,17 @@ fn main() {
             // Print stats for first few layers and last layer
             if layer_idx < 3 || layer_idx == num_layers - 1 {
                 let (h_min, h_max, h_mean) = tensor_stats(&h);
-                println!("  L{:02} hidden: min={:.4}, max={:.4}, mean={:.6}, first5={:.4?}", 
-                    layer_idx, h_min, h_max, h_mean, 
-                    &h[..5].iter().map(|x| (*x * 10000.0).round() / 10000.0).collect::<Vec<_>>());
+                println!(
+                    "  L{:02} hidden: min={:.4}, max={:.4}, mean={:.6}, first5={:.4?}",
+                    layer_idx,
+                    h_min,
+                    h_max,
+                    h_mean,
+                    &h[..5]
+                        .iter()
+                        .map(|x| (*x * 10000.0).round() / 10000.0)
+                        .collect::<Vec<_>>()
+                );
             } else if layer_idx == 3 {
                 println!("  ... (layers 3-{} omitted) ...", num_layers - 2);
             }
@@ -333,8 +377,17 @@ fn main() {
     let normed_final = rms_norm(final_hidden, &final_norm_w, eps);
 
     let (n_min, n_max, n_mean) = tensor_stats(&normed_final);
-    println!("Final normed: min={:.4}, max={:.4}, mean={:.6}", n_min, n_max, n_mean);
-    println!("First 10: {:?}", &normed_final[..10].iter().map(|x| (*x * 10000.0).round() / 10000.0).collect::<Vec<_>>());
+    println!(
+        "Final normed: min={:.4}, max={:.4}, mean={:.6}",
+        n_min, n_max, n_mean
+    );
+    println!(
+        "First 10: {:?}",
+        &normed_final[..10]
+            .iter()
+            .map(|x| (*x * 10000.0).round() / 10000.0)
+            .collect::<Vec<_>>()
+    );
 
     // Output projection
     let output_weight = load_tensor(&gguf, "output.weight");
@@ -346,7 +399,10 @@ fn main() {
     let logits = vec_mat(&normed_final, &output_data, hidden_size, vocab_size);
 
     let (l_min, l_max, l_mean) = tensor_stats(&logits);
-    println!("Logits: min={:.4}, max={:.4}, mean={:.6}", l_min, l_max, l_mean);
+    println!(
+        "Logits: min={:.4}, max={:.4}, mean={:.6}",
+        l_min, l_max, l_mean
+    );
 
     // Find top predictions
     let mut indexed: Vec<(usize, f32)> = logits.iter().cloned().enumerate().collect();
@@ -359,7 +415,14 @@ fn main() {
     }
 
     // Check token 17 ("2")
-    let token_2_rank = indexed.iter().position(|(idx, _)| *idx == 17).unwrap_or(vocab_size);
+    let token_2_rank = indexed
+        .iter()
+        .position(|(idx, _)| *idx == 17)
+        .unwrap_or(vocab_size);
     println!();
-    println!("Token 17 ('2'): logit={:.4}, rank={}", logits[17], token_2_rank + 1);
+    println!(
+        "Token 17 ('2'): logit={:.4}, rank={}",
+        logits[17],
+        token_2_rank + 1
+    );
 }

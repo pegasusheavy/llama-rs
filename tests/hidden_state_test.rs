@@ -5,7 +5,7 @@
 //! results to the llama.cpp reference implementation.
 
 use llama_gguf::{
-    backend::{cpu::CpuBackend, Backend},
+    backend::{Backend, cpu::CpuBackend},
     model::load_llama_model,
     tensor::{DType, Tensor},
 };
@@ -94,7 +94,13 @@ fn test_layer0_forward() {
     let layer = &model.layers()[0];
     let hidden = layer
         .forward(
-            &embedding, &mut k_cache, &mut v_cache, 0, freq_base, freq_scale, &backend,
+            &embedding,
+            &mut k_cache,
+            &mut v_cache,
+            0,
+            freq_base,
+            freq_scale,
+            &backend,
         )
         .expect("Failed to forward through layer 0");
 
@@ -178,12 +184,7 @@ fn test_full_forward_produces_valid_logits() {
 
     // Verify logits are valid (no NaN or Inf)
     for (i, &logit) in logits_data.iter().enumerate() {
-        assert!(
-            logit.is_finite(),
-            "Logit {} is not finite: {}",
-            i,
-            logit
-        );
+        assert!(logit.is_finite(), "Logit {} is not finite: {}", i, logit);
     }
 
     // For single token '=', token '2' (id 17) should be among top predictions

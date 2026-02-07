@@ -3,7 +3,7 @@
 //! score[i,j] = (Q[i] + Q_bias) @ (K[j] + K_bias) * scale
 //!            = Q[i] @ K[j] * scale           -- content-content (varies by i,j)
 //!            + Q[i] @ K_bias * scale         -- content query x bias key (varies by i, same for all j)
-//!            + Q_bias @ K[j] * scale         -- bias query x content key (varies by j, same for all i) 
+//!            + Q_bias @ K[j] * scale         -- bias query x content key (varies by j, same for all i)
 //!            + Q_bias @ K_bias * scale       -- bias-bias (constant)
 //!
 //! For softmax, adding a constant (same for all j) doesn't change the result.
@@ -13,14 +13,17 @@
 //! But wait, that's just what we compute anyway. So the biases should work correctly.
 //! Let me verify by computing WITHOUT biases and seeing if the softmax ordering is preserved.
 
-use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::backend::Backend;
+use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::gguf::GgufFile;
 use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
 
 fn load_tensor(gguf: &GgufFile, name: &str) -> Tensor {
-    let tensor_info = gguf.data.get_tensor(name).expect(&format!("No tensor: {}", name));
+    let tensor_info = gguf
+        .data
+        .get_tensor(name)
+        .expect(&format!("No tensor: {}", name));
     let tensor_data = gguf.tensor_data(name).expect(&format!("No data: {}", name));
     let shape: Vec<usize> = tensor_info.dims.iter().map(|&d| d as usize).collect();
     let dtype = DType::from(tensor_info.dtype);
@@ -50,7 +53,10 @@ fn rms_norm(x: &[f32], w: &[f32], eps: f32) -> Vec<f32> {
     let sum_sq: f32 = x.iter().map(|v| v * v).sum();
     let rms = (sum_sq / x.len() as f32 + eps).sqrt();
     let inv_rms = 1.0 / rms;
-    x.iter().zip(w.iter()).map(|(v, wt)| v * inv_rms * wt).collect()
+    x.iter()
+        .zip(w.iter())
+        .map(|(v, wt)| v * inv_rms * wt)
+        .collect()
 }
 
 fn vec_mat(x: &[f32], w: &[f32], k: usize, n: usize) -> Vec<f32> {
@@ -110,7 +116,7 @@ fn main() {
     let attn_norm_w = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_norm.weight"));
     let wq = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_q.weight"));
     let wk = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_k.weight"));
-    
+
     let q_bias = try_load_tensor(&gguf, "blk.0.attn_q.bias").map(|t| dequant(&backend, &t));
     let k_bias = try_load_tensor(&gguf, "blk.0.attn_k.bias").map(|t| dequant(&backend, &t));
 
@@ -126,11 +132,11 @@ fn main() {
         let start = tok as usize * hidden_size;
         let h: Vec<f32> = emb[start..start + hidden_size].to_vec();
         let normed = rms_norm(&h, &attn_norm_w, eps);
-        
+
         // Without bias
         let mut q = vec_mat(&normed, &wq, hidden_size, num_heads * head_dim);
         let mut k = vec_mat(&normed, &wk, hidden_size, num_kv_heads * head_dim);
-        
+
         // Apply RoPE (before bias addition, to match what we should do)
         for head in 0..num_heads {
             let offset = head * head_dim;
@@ -140,18 +146,22 @@ fn main() {
             let offset = head * head_dim;
             apply_rope(&mut k[offset..offset + head_dim], pos, head_dim, freq_base);
         }
-        
+
         q_no_bias.push(q.clone());
         k_no_bias.push(k.clone());
-        
+
         // With bias (add after RoPE)
         if let Some(ref bias) = q_bias {
-            for (qi, bi) in q.iter_mut().zip(bias.iter()) { *qi += *bi; }
+            for (qi, bi) in q.iter_mut().zip(bias.iter()) {
+                *qi += *bi;
+            }
         }
         if let Some(ref bias) = k_bias {
-            for (ki, bi) in k.iter_mut().zip(bias.iter()) { *ki += *bi; }
+            for (ki, bi) in k.iter_mut().zip(bias.iter()) {
+                *ki += *bi;
+            }
         }
-        
+
         q_with_bias.push(q);
         k_with_bias.push(k);
     }
@@ -167,9 +177,13 @@ fn main() {
     // Decompose scores for query at position 3
     let q_vec_no_bias = &q_no_bias[query_pos][head * head_dim..(head + 1) * head_dim];
     let q_vec_with_bias = &q_with_bias[query_pos][head * head_dim..(head + 1) * head_dim];
-    
-    let qb = q_bias.as_ref().map(|b| &b[head * head_dim..(head + 1) * head_dim]);
-    let kb = k_bias.as_ref().map(|b| &b[kv_head * head_dim..(kv_head + 1) * head_dim]);
+
+    let qb = q_bias
+        .as_ref()
+        .map(|b| &b[head * head_dim..(head + 1) * head_dim]);
+    let kb = k_bias
+        .as_ref()
+        .map(|b| &b[kv_head * head_dim..(kv_head + 1) * head_dim]);
 
     println!("Score decomposition:");
     println!("  score[q,k] = Q @ K + Q @ Kb + Qb @ K + Qb @ Kb");
@@ -177,15 +191,24 @@ fn main() {
 
     let mut scores_no_bias = vec![0.0f32; 4];
     let mut scores_with_bias = vec![0.0f32; 4];
-    let mut q_dot_kb = vec![0.0f32; 4];  // same for all key positions
+    let mut q_dot_kb = vec![0.0f32; 4]; // same for all key positions
     let mut qb_dot_k = vec![0.0f32; 4];
     let qb_dot_kb: f32;
 
     // Q @ K_bias (same for all key positions)
     if let Some(kb) = kb {
-        let dot: f32 = q_vec_no_bias.iter().zip(kb.iter()).map(|(a, b)| a * b).sum();
-        for v in q_dot_kb.iter_mut() { *v = dot; }
-        println!("Q @ K_bias = {:.2} (constant for all key positions)", dot * scale);
+        let dot: f32 = q_vec_no_bias
+            .iter()
+            .zip(kb.iter())
+            .map(|(a, b)| a * b)
+            .sum();
+        for v in q_dot_kb.iter_mut() {
+            *v = dot;
+        }
+        println!(
+            "Q @ K_bias = {:.2} (constant for all key positions)",
+            dot * scale
+        );
     }
 
     // Q_bias @ K_bias
@@ -197,21 +220,32 @@ fn main() {
     }
     println!();
 
-    println!("{:>5} | {:>10} | {:>10} | {:>10} | {:>10} | {:>10} | {:>10}",
-        "kpos", "Q@K", "Q@Kb", "Qb@K", "Qb@Kb", "Total", "NoBias");
-    println!("{:-<5}-+-{:-<10}-+-{:-<10}-+-{:-<10}-+-{:-<10}-+-{:-<10}-+-{:-<10}",
-        "", "", "", "", "", "", "");
+    println!(
+        "{:>5} | {:>10} | {:>10} | {:>10} | {:>10} | {:>10} | {:>10}",
+        "kpos", "Q@K", "Q@Kb", "Qb@K", "Qb@Kb", "Total", "NoBias"
+    );
+    println!(
+        "{:-<5}-+-{:-<10}-+-{:-<10}-+-{:-<10}-+-{:-<10}-+-{:-<10}-+-{:-<10}",
+        "", "", "", "", "", "", ""
+    );
 
     for kv_pos in 0..4 {
         let k_vec_no_bias = &k_no_bias[kv_pos][kv_head * head_dim..(kv_head + 1) * head_dim];
         let k_vec_with_bias = &k_with_bias[kv_pos][kv_head * head_dim..(kv_head + 1) * head_dim];
 
         // Q @ K (content-content)
-        let q_dot_k: f32 = q_vec_no_bias.iter().zip(k_vec_no_bias.iter()).map(|(a, b)| a * b).sum();
-        
+        let q_dot_k: f32 = q_vec_no_bias
+            .iter()
+            .zip(k_vec_no_bias.iter())
+            .map(|(a, b)| a * b)
+            .sum();
+
         // Q_bias @ K (varies by key position)
         let qb_dot_k_val: f32 = if let Some(qb) = qb {
-            qb.iter().zip(k_vec_no_bias.iter()).map(|(a, b)| a * b).sum()
+            qb.iter()
+                .zip(k_vec_no_bias.iter())
+                .map(|(a, b)| a * b)
+                .sum()
         } else {
             0.0
         };
@@ -220,27 +254,43 @@ fn main() {
         scores_no_bias[kv_pos] = q_dot_k * scale;
         scores_with_bias[kv_pos] = (q_dot_k + q_dot_kb[kv_pos] + qb_dot_k_val + qb_dot_kb) * scale;
 
-        println!("{:>5} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2}",
+        println!(
+            "{:>5} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2} | {:>10.2}",
             kv_pos,
             q_dot_k * scale,
             q_dot_kb[kv_pos] * scale,
             qb_dot_k_val * scale,
             qb_dot_kb * scale,
             scores_with_bias[kv_pos],
-            scores_no_bias[kv_pos]);
+            scores_no_bias[kv_pos]
+        );
     }
 
     println!();
     println!("Softmax comparison:");
-    
+
     let probs_no_bias = softmax(&scores_no_bias);
     let probs_with_bias = softmax(&scores_with_bias);
-    
-    println!("  Without bias: {:?}", probs_no_bias.iter().map(|x| format!("{:.4}", x)).collect::<Vec<_>>());
-    println!("  With bias:    {:?}", probs_with_bias.iter().map(|x| format!("{:.4}", x)).collect::<Vec<_>>());
-    
+
+    println!(
+        "  Without bias: {:?}",
+        probs_no_bias
+            .iter()
+            .map(|x| format!("{:.4}", x))
+            .collect::<Vec<_>>()
+    );
+    println!(
+        "  With bias:    {:?}",
+        probs_with_bias
+            .iter()
+            .map(|x| format!("{:.4}", x))
+            .collect::<Vec<_>>()
+    );
+
     // Check: do they match?
-    let diff: f32 = probs_no_bias.iter().zip(probs_with_bias.iter())
+    let diff: f32 = probs_no_bias
+        .iter()
+        .zip(probs_with_bias.iter())
         .map(|(a, b)| (a - b).abs())
         .sum();
     println!("  Total abs diff: {:.6}", diff);
@@ -251,16 +301,31 @@ fn main() {
     println!("The 'Qb@K' term varies by key position and is NOT cancelled by softmax.");
     println!("This is expected behavior - the bias affects attention patterns.");
     println!();
-    
+
     // Check if this causes issues
-    let max_qb_k_diff = qb_dot_k.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap()
-        - qb_dot_k.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-    println!("Qb@K range: {:.2} (difference between key positions)", max_qb_k_diff * scale);
-    
-    let max_qk_diff = scores_no_bias.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap()
-        - scores_no_bias.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+    let max_qb_k_diff = qb_dot_k
+        .iter()
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap()
+        - qb_dot_k
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap();
+    println!(
+        "Qb@K range: {:.2} (difference between key positions)",
+        max_qb_k_diff * scale
+    );
+
+    let max_qk_diff = scores_no_bias
+        .iter()
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap()
+        - scores_no_bias
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap();
     println!("Q@K range:  {:.2} (content-based differences)", max_qk_diff);
-    
+
     println!();
     if max_qb_k_diff * scale > max_qk_diff * 10.0 {
         println!("WARNING: Bias-content interaction dominates content-content interaction!");

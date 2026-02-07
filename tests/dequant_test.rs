@@ -105,7 +105,7 @@ fn test_q4_0_large_values() {
         // Error should be within one quantization step
         let error = (o - d).abs();
         assert!(
-            error <= expected_step * 1.1,  // Allow small margin
+            error <= expected_step * 1.1, // Allow small margin
             "Q4_0 large value error: original={}, decoded={}, error={}, expected_step={}",
             o,
             d,
@@ -133,11 +133,7 @@ fn test_q8_0_precision() {
         / 32.0;
     let rms_error = rms_error.sqrt();
 
-    assert!(
-        rms_error < 0.005,
-        "Q8_0 RMS error too high: {}",
-        rms_error
-    );
+    assert!(rms_error < 0.005, "Q8_0 RMS error too high: {}", rms_error);
 }
 
 #[test]
@@ -161,8 +157,8 @@ fn test_q4_1_with_offset() {
 
 #[test]
 fn test_dequantize_q5_0() {
-    use llama_gguf::tensor::quant::BlockQ5_0;
     use half::f16;
+    use llama_gguf::tensor::quant::BlockQ5_0;
 
     // Create a simple Q5_0 block for testing
     // This tests that the 5-bit unpacking works correctly
@@ -189,8 +185,8 @@ fn test_dequantize_q5_0() {
 
 #[test]
 fn test_dequantize_q5_1() {
-    use llama_gguf::tensor::quant::BlockQ5_1;
     use half::f16;
+    use llama_gguf::tensor::quant::BlockQ5_1;
 
     // Create a simple Q5_1 block for testing
     let block = BlockQ5_1 {

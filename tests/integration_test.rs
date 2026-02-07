@@ -153,11 +153,7 @@ fn test_softmax_2d() {
     let backend = default_backend();
 
     // 2x4 matrix - softmax along last dimension
-    let input = Tensor::from_f32(
-        &[1.0, 2.0, 3.0, 4.0, 4.0, 3.0, 2.0, 1.0],
-        vec![2, 4],
-    )
-    .unwrap();
+    let input = Tensor::from_f32(&[1.0, 2.0, 3.0, 4.0, 4.0, 3.0, 2.0, 1.0], vec![2, 4]).unwrap();
     let mut output = Tensor::zeros(vec![2, 4], DType::F32);
 
     backend.softmax(&input, &mut output).unwrap();
@@ -183,7 +179,9 @@ fn test_rms_norm() {
     let weight = Tensor::from_f32(&[1.0, 1.0, 1.0, 1.0], vec![4]).unwrap();
     let mut output = Tensor::zeros(vec![4], DType::F32);
 
-    backend.rms_norm(&input, &weight, 1e-5, &mut output).unwrap();
+    backend
+        .rms_norm(&input, &weight, 1e-5, &mut output)
+        .unwrap();
 
     let result = output.as_f32().unwrap();
 
@@ -203,7 +201,9 @@ fn test_rms_norm_with_weights() {
     let weight = Tensor::from_f32(&[2.0, 2.0, 2.0, 2.0], vec![4]).unwrap();
     let mut output = Tensor::zeros(vec![4], DType::F32);
 
-    backend.rms_norm(&input, &weight, 1e-5, &mut output).unwrap();
+    backend
+        .rms_norm(&input, &weight, 1e-5, &mut output)
+        .unwrap();
 
     let result = output.as_f32().unwrap();
 
@@ -240,7 +240,9 @@ fn test_matvec() {
 
     // 3x4 @ 4 = 3
     let a = Tensor::from_f32(
-        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+        &[
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ],
         vec![3, 4],
     )
     .unwrap();

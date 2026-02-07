@@ -1,13 +1,16 @@
 //! Debug attention scores across multiple positions to understand bias impact.
 
-use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::backend::Backend;
+use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::gguf::GgufFile;
 use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
 
 fn load_tensor(gguf: &GgufFile, name: &str) -> Tensor {
-    let tensor_info = gguf.data.get_tensor(name).expect(&format!("No tensor: {}", name));
+    let tensor_info = gguf
+        .data
+        .get_tensor(name)
+        .expect(&format!("No tensor: {}", name));
     let tensor_data = gguf.tensor_data(name).expect(&format!("No data: {}", name));
     let shape: Vec<usize> = tensor_info.dims.iter().map(|&d| d as usize).collect();
     let dtype = DType::from(tensor_info.dtype);
@@ -37,7 +40,10 @@ fn rms_norm(x: &[f32], w: &[f32], eps: f32) -> Vec<f32> {
     let sum_sq: f32 = x.iter().map(|v| v * v).sum();
     let rms = (sum_sq / x.len() as f32 + eps).sqrt();
     let inv_rms = 1.0 / rms;
-    x.iter().zip(w.iter()).map(|(v, wt)| v * inv_rms * wt).collect()
+    x.iter()
+        .zip(w.iter())
+        .map(|(v, wt)| v * inv_rms * wt)
+        .collect()
 }
 
 fn vec_mat(x: &[f32], w: &[f32], k: usize, n: usize) -> Vec<f32> {
@@ -103,7 +109,7 @@ fn main() {
     let wq = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_q.weight"));
     let wk = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_k.weight"));
     let wv = dequant(&backend, &load_tensor(&gguf, "blk.0.attn_v.weight"));
-    
+
     let q_bias = try_load_tensor(&gguf, "blk.0.attn_q.bias").map(|t| dequant(&backend, &t));
     let k_bias = try_load_tensor(&gguf, "blk.0.attn_k.bias").map(|t| dequant(&backend, &t));
     let v_bias = try_load_tensor(&gguf, "blk.0.attn_v.bias").map(|t| dequant(&backend, &t));
@@ -119,26 +125,32 @@ fn main() {
         // Get embedding
         let start = tok as usize * hidden_size;
         let h: Vec<f32> = emb[start..start + hidden_size].to_vec();
-        
+
         // RMS norm
         let normed = rms_norm(&h, &attn_norm_w, eps);
-        
+
         // Q, K, V projections
         let mut q = vec_mat(&normed, &wq, hidden_size, num_heads * head_dim);
         let mut k = vec_mat(&normed, &wk, hidden_size, num_kv_heads * head_dim);
         let mut v = vec_mat(&normed, &wv, hidden_size, num_kv_heads * head_dim);
-        
+
         // Add biases
         if let Some(ref bias) = q_bias {
-            for (qi, bi) in q.iter_mut().zip(bias.iter()) { *qi += *bi; }
+            for (qi, bi) in q.iter_mut().zip(bias.iter()) {
+                *qi += *bi;
+            }
         }
         if let Some(ref bias) = k_bias {
-            for (ki, bi) in k.iter_mut().zip(bias.iter()) { *ki += *bi; }
+            for (ki, bi) in k.iter_mut().zip(bias.iter()) {
+                *ki += *bi;
+            }
         }
         if let Some(ref bias) = v_bias {
-            for (vi, bi) in v.iter_mut().zip(bias.iter()) { *vi += *bi; }
+            for (vi, bi) in v.iter_mut().zip(bias.iter()) {
+                *vi += *bi;
+            }
         }
-        
+
         // Apply RoPE
         for head in 0..num_heads {
             let offset = head * head_dim;
@@ -148,7 +160,7 @@ fn main() {
             let offset = head * head_dim;
             apply_rope(&mut k[offset..offset + head_dim], pos, head_dim, freq_base);
         }
-        
+
         all_q.push(q);
         all_k.push(k);
         all_v.push(v);
@@ -157,34 +169,47 @@ fn main() {
     // Analyze attention scores at position 3 (4 tokens to attend to)
     let pos = 3;
     let q = &all_q[pos];
-    
+
     println!("Position 3: attending to 4 tokens (\"1\", \"+\", \"1\", \"=\")");
     println!("scale = {}", scale);
     println!();
 
     let queries_per_kv = num_heads / num_kv_heads;
-    
-    for head in 0..3 {  // Just first 3 heads
+
+    for head in 0..3 {
+        // Just first 3 heads
         let kv_head = head / queries_per_kv;
         let q_offset = head * head_dim;
         let q_vec = &q[q_offset..q_offset + head_dim];
-        
+
         println!("Head {} (KV head {}):", head, kv_head);
-        
+
         let mut scores = vec![0.0f32; 4];
         for kv_pos in 0..4 {
             let k_vec = &all_k[kv_pos][kv_head * head_dim..(kv_head + 1) * head_dim];
             let dot: f32 = q_vec.iter().zip(k_vec.iter()).map(|(a, b)| a * b).sum();
             scores[kv_pos] = dot * scale;
         }
-        
-        println!("  Raw scores (scaled): {:?}", scores.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>());
-        
+
+        println!(
+            "  Raw scores (scaled): {:?}",
+            scores
+                .iter()
+                .map(|x| format!("{:.2}", x))
+                .collect::<Vec<_>>()
+        );
+
         // Softmax
         let mut probs = scores.clone();
         softmax(&mut probs);
-        println!("  Softmax probs: {:?}", probs.iter().map(|x| format!("{:.4}", x)).collect::<Vec<_>>());
-        
+        println!(
+            "  Softmax probs: {:?}",
+            probs
+                .iter()
+                .map(|x| format!("{:.4}", x))
+                .collect::<Vec<_>>()
+        );
+
         // Compute V @ probs weighted sum
         let mut attn_out = vec![0.0f32; head_dim];
         for kv_pos in 0..4 {
@@ -195,43 +220,60 @@ fn main() {
         }
         let ao_sum: f32 = attn_out.iter().sum();
         let ao_sum_sq: f32 = attn_out.iter().map(|x| x * x).sum();
-        println!("  Attention out: sum={:.4}, sum_sq={:.4}", ao_sum, ao_sum_sq);
+        println!(
+            "  Attention out: sum={:.4}, sum_sq={:.4}",
+            ao_sum, ao_sum_sq
+        );
         println!();
     }
 
     // Compare score differences
     println!("=== Score Analysis ===");
     println!();
-    
+
     let head = 0;
     let kv_head = 0;
     let q_vec = &q[head * head_dim..(head + 1) * head_dim];
-    
+
     // What would scores be WITHOUT biases?
     println!("Without biases:");
-    let q_no_bias = &all_q[pos].iter().enumerate()
+    let q_no_bias = &all_q[pos]
+        .iter()
+        .enumerate()
         .map(|(i, &v)| v - q_bias.as_ref().map(|b| b[i]).unwrap_or(0.0))
         .collect::<Vec<_>>()[head * head_dim..(head + 1) * head_dim];
-    
+
     for kv_pos in 0..4 {
         let k_no_bias: Vec<f32> = all_k[kv_pos][kv_head * head_dim..(kv_head + 1) * head_dim]
             .iter()
             .enumerate()
             .map(|(i, &v)| v - k_bias.as_ref().map(|b| b[i]).unwrap_or(0.0))
             .collect();
-        
-        let dot: f32 = q_no_bias.iter().zip(k_no_bias.iter()).map(|(a, b)| a * b).sum();
-        println!("  Pos {}: Q@K = {:.2}, scaled = {:.2}", kv_pos, dot, dot * scale);
+
+        let dot: f32 = q_no_bias
+            .iter()
+            .zip(k_no_bias.iter())
+            .map(|(a, b)| a * b)
+            .sum();
+        println!(
+            "  Pos {}: Q@K = {:.2}, scaled = {:.2}",
+            kv_pos,
+            dot,
+            dot * scale
+        );
     }
     println!();
-    
+
     println!("Bias contribution:");
     if let (Some(qb), Some(kb)) = (&q_bias, &k_bias) {
         let qb_head = &qb[head * head_dim..(head + 1) * head_dim];
         let kb_head = &kb[kv_head * head_dim..(kv_head + 1) * head_dim];
-        
+
         let bias_dot: f32 = qb_head.iter().zip(kb_head.iter()).map(|(a, b)| a * b).sum();
-        println!("  Q_bias @ K_bias = {:.2} (constant across positions)", bias_dot);
+        println!(
+            "  Q_bias @ K_bias = {:.2} (constant across positions)",
+            bias_dot
+        );
         println!("  Scaled = {:.2}", bias_dot * scale);
     }
 }

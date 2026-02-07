@@ -3,8 +3,8 @@
 //! Contiguous: [head0_dim0, head0_dim1, ..., head0_dim63, head1_dim0, ...]
 //! Interleaved: [head0_dim0, head1_dim0, ..., headN_dim0, head0_dim1, ...]
 
-use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::backend::Backend;
+use llama_gguf::backend::cpu::CpuBackend;
 use llama_gguf::gguf::GgufFile;
 use llama_gguf::tensor::{DType, Tensor};
 use std::path::Path;
@@ -26,7 +26,7 @@ fn main() {
     let wq_data = gguf.tensor_data("blk.0.attn_q.weight").unwrap();
     let wq_shape: Vec<usize> = wq_info.dims.iter().map(|&d| d as usize).collect();
     let wq = Tensor::new(wq_data.to_vec(), wq_shape, DType::from(wq_info.dtype)).unwrap();
-    
+
     let mut wq_f32 = Tensor::zeros(vec![wq.numel()], DType::F32);
     backend.dequantize(&wq, &mut wq_f32).unwrap();
     let wq_vals = wq_f32.as_f32().unwrap();
@@ -52,7 +52,7 @@ fn main() {
     // independent of weights for head 1 (columns 64-127)
 
     // Let's compute the mean absolute value for each "head" under both assumptions
-    
+
     println!("Under CONTIGUOUS assumption (columns 0-63 = head 0, etc.):");
     for head in 0..3 {
         let start_col = head * head_dim;
@@ -87,9 +87,8 @@ fn main() {
     println!("=== Q Bias Pattern ===");
     let qb_info = gguf.data.get_tensor("blk.0.attn_q.bias").unwrap();
     let qb_data = gguf.tensor_data("blk.0.attn_q.bias").unwrap();
-    let qb: &[f32] = unsafe {
-        std::slice::from_raw_parts(qb_data.as_ptr() as *const f32, qb_data.len() / 4)
-    };
+    let qb: &[f32] =
+        unsafe { std::slice::from_raw_parts(qb_data.as_ptr() as *const f32, qb_data.len() / 4) };
 
     println!("Q bias shape: {:?}", qb_info.dims);
     println!();
@@ -102,18 +101,26 @@ fn main() {
         let min = slice.iter().cloned().fold(f32::INFINITY, f32::min);
         let max = slice.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let mean: f32 = slice.iter().sum::<f32>() / slice.len() as f32;
-        println!("  Head {}: min={:.4}, max={:.4}, mean={:.4}", head, min, max, mean);
+        println!(
+            "  Head {}: min={:.4}, max={:.4}, mean={:.4}",
+            head, min, max, mean
+        );
     }
     println!();
 
     // Under INTERLEAVED: bias[0], bias[14], bias[28], ... = dim 0 of each head
     println!("Under INTERLEAVED (bias[0,14,28,...] = dim 0 of each head):");
     for dim_pos in 0..3 {
-        let values: Vec<f32> = (0..num_heads).map(|h| qb[dim_pos * num_heads + h]).collect();
+        let values: Vec<f32> = (0..num_heads)
+            .map(|h| qb[dim_pos * num_heads + h])
+            .collect();
         let min = values.iter().cloned().fold(f32::INFINITY, f32::min);
         let max = values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let mean: f32 = values.iter().sum::<f32>() / values.len() as f32;
-        println!("  Dim {} across heads: min={:.4}, max={:.4}, mean={:.4}", dim_pos, min, max, mean);
+        println!(
+            "  Dim {} across heads: min={:.4}, max={:.4}, mean={:.4}",
+            dim_pos, min, max, mean
+        );
         println!("    Values: {:?}", values);
     }
     println!();
@@ -127,8 +134,14 @@ fn main() {
             let head_if_interleaved = i % num_heads;
             let dim_if_interleaved = i / num_heads;
             println!("  bias[{}] = {:.2}", i, val);
-            println!("    Contiguous: head {}, dim {}", head_if_contig, dim_if_contig);
-            println!("    Interleaved: head {}, dim {}", head_if_interleaved, dim_if_interleaved);
+            println!(
+                "    Contiguous: head {}, dim {}",
+                head_if_contig, dim_if_contig
+            );
+            println!(
+                "    Interleaved: head {}, dim {}",
+                head_if_interleaved, dim_if_interleaved
+            );
             if i > 20 {
                 println!("  ...");
                 break;

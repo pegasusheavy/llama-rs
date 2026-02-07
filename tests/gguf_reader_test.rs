@@ -1,5 +1,5 @@
+use llama_gguf::gguf::{GGUF_MAGIC, GgufError, GgufReader};
 use std::io::Cursor;
-use llama_gguf::gguf::{GgufReader, GgufError, GGUF_MAGIC};
 
 fn create_minimal_gguf_v3() -> Vec<u8> {
     let mut data = Vec::new();
